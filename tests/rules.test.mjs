@@ -7,6 +7,7 @@ import {
   weekStart,
   weekEnd,
   bettingOpen,
+  lateJoinBankroll,
   validateBet,
   grade,
 } from '../functions/rules.js';
@@ -20,6 +21,12 @@ const bet = {
   sportsbook: 'FanDuel',
   market: 'Spread',
 };
+test('late entry defaults count only betting weeks still available', () => {
+  assert.equal(lateJoinBankroll(Date.parse('2026-09-15T14:00:00Z'),c.startDate),17000);
+  assert.equal(lateJoinBankroll(Date.parse('2026-09-15T05:00:00Z'),c.startDate),17000);
+  assert.equal(lateJoinBankroll(weekStart(c.startDate,18),c.startDate),1000);
+  assert.equal(lateJoinBankroll(weekEnd(c.startDate,18),c.startDate),0);
+});
 test('week one protects $170 and unlocks settled returns during the same week', () => {
   assert.deepEqual(funds(18000, 18000, 0, 1), {
     reserve: 17000,

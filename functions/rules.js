@@ -44,6 +44,10 @@ export function bettingOpen(ms, start) {
   const week = weekAt(ms, start);
   return week >= 1 && week <= WEEKS && ms >= weekStart(start, week) && ms < weekEnd(start, week);
 }
+export function lateJoinBankroll(ms, start) {
+  const week = Math.max(1, weekAt(ms, start));
+  return Math.max(0, WEEKS - week + (ms < weekEnd(start, week) ? 1 : 0)) * MINIMUM;
+}
 export function payout(stake, odds, status) {
   if (status === 'push' || status === 'void') return stake;
   if (status === 'lost' || status === 'pending') return 0;

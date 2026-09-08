@@ -8,7 +8,7 @@ async function main() {
   await requireAuth(options);
   const functions = new Client({ urlPrefix: 'https://cloudfunctions.googleapis.com', auth: true });
   const base = `/v2/projects/${project}/locations/us-central1/functions`;
-  const callable = ['joinLeague', 'placeBet', 'settleBet', 'refreshStandings', 'flagBet'];
+  const callable = ['joinLeague', 'placeBet', 'settleBet', 'refreshStandings', 'flagBet', 'reviewJoinRequest'];
   for (const name of [...callable, 'closeLeagueWeeks', 'syncFootballScores']) {
     const f = (await functions.get(base + '/' + name)).body;
     if (f.state !== 'ACTIVE') throw Error(name + ' is not ACTIVE. League remains paused.');

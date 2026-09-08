@@ -23,6 +23,7 @@ import {
   weekStart,
   weekEnd,
   bettingOpen,
+  lateJoinBankroll,
   payout,
 } from '@/functions/rules.js';
 import { Button } from '@/components/ui/button';
@@ -105,6 +106,9 @@ export default function Home() {
     [events, setEvents] = useState<RecordData[]>([]),
     [rosters, setRosters] = useState<RecordData[]>([]),
     [audit, setAudit] = useState<RecordData[]>([]);
+  const [joinRequests, setJoinRequests] = useState<RecordData[]>([]),
+    [ownJoinRequest, setOwnJoinRequest] = useState<RecordData | null>(null),
+    [joinBudgets, setJoinBudgets] = useState<Record<string, string>>({});
   const [now, setNow] = useState(0),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState(''),
@@ -205,6 +209,14 @@ export default function Home() {
     );
     return () => stops.forEach((s) => s());
   }, [me?.id, commissioner]);
+  useEffect(() => {
+    setJoinRequests([]); setOwnJoinRequest(null);
+    if (!user) return;
+    const fail = (e: Error) => setError(e.message);
+    const stops = [onSnapshot(doc(db, 'joinRequests', user.uid), (d) => setOwnJoinRequest(d.exists() ? {id:d.id,...d.data()} : null), fail)];
+    if (commissioner) stops.push(onSnapshot(collection(db,'joinRequests'), (s) => setJoinRequests(s.docs.map(d=>({id:d.id,...d.data()}))), fail));
+    return () => stops.forEach(stop=>stop());
+  }, [user, commissioner]);
   const start = config?.startDate ?? '2026-09-08',
     actualWeek = now ? weekAt(now, start) : 0,
     week = Math.max(1, Math.min(18, actualWeek)),
@@ -464,7 +476,7 @@ export default function Home() {
             e.preventDefault();
             action(
               () => call('joinLeague', { username }),
-              'Welcome to the league. Your $180 bankroll is ready.',
+              now >= weekEnd(start, 1) ? 'Late-entry request sent to the commissioner.' : 'Welcome to the league. Your $180 bankroll is ready.',
             );
           }}
         >
@@ -472,7 +484,8 @@ export default function Home() {
             <h2>Pick your league name.</h2>
             <p>
               3–20 letters, numbers, or underscores. This name is public to
-              players.
+              players. Joining is open through Week 1. Later entries need commissioner approval and an assigned bankroll.
+              {ownJoinRequest?.status === 'declined' && ' Your previous request was declined; you may submit a revised request.'}
             </p>
           </div>
           <label className="sr-only" htmlFor="username">
@@ -489,10 +502,10 @@ export default function Home() {
             onChange={(e) => setUsername(e.target.value)}
           />
           <Button
-            disabled={busy || actualWeek > 1 || !backendEnabled}
+            disabled={busy || !backendEnabled || ownJoinRequest?.status === 'pending' || lateJoinBankroll(now,start) === 0}
             type="submit"
           >
-            Join league
+            {ownJoinRequest?.status === 'pending' ? 'Awaiting commissioner approval' : now >= weekEnd(start,1) ? 'Request late entry' : 'Join league'}
           </Button>
         </form>
       )}
@@ -864,6 +877,15 @@ export default function Home() {
             {commissioner && (
               <TabsContent value="commissioner">
                 <section className="panel">
+                  <h2>Late-entry requests</h2>
+                  {joinRequests.filter(r=>r.status==='pending').length===0 && <p className="hint">No late-entry requests.</p>}
+                  {joinRequests.filter(r=>r.status==='pending').map(r=><form className="bet-card" key={r.id} onSubmit={e=>{e.preventDefault(); action(()=>call('reviewJoinRequest',{requestId:r.id,approve:true,bankroll:Math.round(Number(joinBudgets[r.id] ?? lateJoinBankroll(now,start)/100)*100)}),'Late entry approved.');}}>
+                    <strong>{r.username}</strong>
+                    <label>Starting bankroll ($)<input type="number" min="0" max="1000000" step="0.01" required value={joinBudgets[r.id] ?? String(lateJoinBankroll(now,start)/100)} onChange={e=>setJoinBudgets({...joinBudgets,[r.id]:e.target.value})}/></label>
+                    <p className="hint">Default: $10 for each remaining betting week, including the current week while it is open.</p>
+                    <Button type="submit" disabled={busy || !backendEnabled}>Approve entry</Button>{' '}
+                    <Button type="button" variant="outline" disabled={busy || !backendEnabled} onClick={()=>action(()=>call('reviewJoinRequest',{requestId:r.id,approve:false}),'Entry request declined.')}>Decline</Button>
+                  </form>)}
                   <h2>Player review requests</h2>
                   {bets.filter((b) => b.review?.status === 'open').length === 0 && <p className="hint">No player flags awaiting review.</p>}
                   {bets.filter((b) => b.review?.status === 'open').map((b) => <article className="bet-card" key={b.id}>

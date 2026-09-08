@@ -12,6 +12,7 @@ service cloud.firestore {
   match /rosters/{id} {allow read: if signedIn(); allow write: if false;}
   match /gameStats/{id} {allow read: if member(); allow write: if false;}
   match /audit/{id} {allow read: if member(); allow write: if false;}
+  match /joinRequests/{id} {allow read: if signedIn() && (request.auth.uid == id || request.auth.uid in get(/databases/$(database)/documents/config/league).data.commissionerUids); allow write: if false;}
   match /{document=**} {allow read,write: if false;}
  }
 }

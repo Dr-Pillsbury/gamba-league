@@ -34,7 +34,7 @@ The project is now on Blaze. All seven functions are ACTIVE, callable endpoints 
 - Bet submissions use server time, are immutable, and require an upcoming start inside the current week. Custom events rely on the supplied start time and commissioner review. For a parlay, use the earliest leg start.
 - Transactions serialize concurrent bets against the player's wallet. A client request ID makes retries idempotent. Settlement is transactional and repeat-safe.
 - Tuesday 10:15 a.m. snapshots reconstruct balances and weekly compliance at the cutoff from the append-only ledger. Late results and corrections affect live standings, not frozen historical finishes. No automatic winner is declared while results remain pending; the top final live balance is the winner once all Week 18 bets are settled.
-- Usernames are case-insensitively unique, 3–20 letters/numbers/underscores. Joining after Week 1 is disabled. This is one friends league and one season; a season reset or multiple leagues is not implemented.
+- Usernames are case-insensitively unique, 3–20 letters/numbers/underscores. Joining through Week 1 is automatic; later entry requires commissioner approval. This is one friends league and one season; a season reset or multiple leagues is not implemented.
 
 ## Development and validation
 
@@ -76,3 +76,5 @@ Reference: https://d38ayms4az88sz.cloudfront.net/SB/CT/2026-07-30T12-42-48.html
 The owner can run `node scripts/activate-backend.cjs --verify-only` for read-only checks. Without that flag, the script enables betting, data imports and automatic settlement and requests an initial refresh; run only after explicit activation approval.
 
 Weekly betting opens Tuesday at 10 a.m. Eastern and closes Monday at 11:59 p.m. Tuesday midnight–10 a.m. is closed, enforced by both UI and callable validation. Daily nflverse settlement runs at 10 a.m.; the new week opens at that time without waiting for missing results. Snapshots run Tuesday at 10:15 a.m. and preserve the Monday-night balance cutoff; subsequent settlements affect live balances. Eastern DST is respected.
+
+Late entries are requested via joinLeague after the Monday-night Week 1 deadline. reviewJoinRequest is commissioner-only and transactionally assigns the chosen starting bankroll, reserves the username, and writes the opening allocation to the ledger. Default allocation is $10 per remaining betting week; a closed Tuesday morning does not count the completed week. Requests may be declined; no account is created until approval.

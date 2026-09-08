@@ -10,6 +10,7 @@ import {
   weekAt,
   weekStart,
   weekEnd,
+  lateJoinBankroll,
   validateBet,
   payout,
   grade,
@@ -64,16 +65,20 @@ export const joinLeague = clean(async (req) => {
     name = String(req.data?.username ?? '').trim();
   if (!/^[A-Za-z0-9_]{3,20}$/.test(name))
     throw Error('Use 3–20 letters, numbers, or underscores.');
-  if (weekAt(Date.now(), c.startDate) > 1)
-    throw Error(
-      'League entry closed after Week 1. Ask your commissioner about next season.',
-    );
+  const at = Date.now(), late = at >= weekEnd(c.startDate, 1);
+  if (!lateJoinBankroll(at, c.startDate)) throw Error('This season has ended.');
   await db.runTransaction(async (tx) => {
     const member = db.doc('members/' + id),
       handle = db.doc('usernames/' + name.toLowerCase());
     const [m, h] = await Promise.all([tx.get(member), tx.get(handle)]);
     if (m.exists) return;
     if (h.exists) throw Error('That username is taken.');
+    if (late) {
+      const request = db.doc('joinRequests/' + id), previous = await tx.get(request);
+      if (previous.data()?.status === 'pending') return;
+      tx.set(request, { uid: id, username: name, status: 'pending', requestedAt: at });
+      return;
+    }
     tx.create(handle, { uid: id });
     tx.create(member, {
       username: name,
@@ -82,6 +87,29 @@ export const joinLeague = clean(async (req) => {
     });
   });
   return { ok: true };
+});
+export const reviewJoinRequest = clean(async (req) => {
+  const actor = uid(req), c = await config(); admin(actor, c);
+  const { requestId, approve, bankroll } = req.data ?? {};
+  if (typeof requestId !== 'string' || !requestId || requestId.includes('/') || typeof approve !== 'boolean') throw Error('Invalid entry request.');
+  const at = Date.now(), allocation = bankroll ?? lateJoinBankroll(at, c.startDate);
+  if (approve && (!Number.isSafeInteger(allocation) || allocation < 0 || allocation > 100000000)) throw Error('Enter a bankroll from $0 to $1,000,000 in whole cents.');
+  await db.runTransaction(async tx => {
+    const ref = db.doc('joinRequests/' + requestId), r = await tx.get(ref);
+    if (!r.exists || r.data().status !== 'pending') throw Error('Request is no longer pending.');
+    const data = r.data(), member = db.doc('members/' + requestId), handle = db.doc('usernames/' + data.username.toLowerCase());
+    const [m,h] = await Promise.all([tx.get(member),tx.get(handle)]);
+    if (approve) {
+      if (!lateJoinBankroll(at,c.startDate)) throw Error('This season has ended.');
+      if (m.exists || h.exists) throw Error('Player already joined or username is taken. Ask the player to request a different name.');
+      tx.create(handle,{uid:requestId});
+      tx.create(member,{username:data.username,balance:allocation,joinedAt:at,startingBankroll:allocation,approvedBy:actor});
+      tx.create(db.collection('ledger').doc(),{uid:requestId,delta:allocation-INITIAL,at,kind:'late entry allocation',week:Math.max(1,weekAt(at,c.startDate)),stakeDelta:0});
+    }
+    tx.update(ref,{status:approve?'approved':'declined',resolvedAt:at,resolvedBy:actor,...(approve?{bankroll:allocation}:{})});
+    tx.create(db.collection('audit').doc(),{username:data.username,selection:'Late league entry',from:'pending',to:approve?'approved':'declined',actor,reason:approve?'Commissioner allotted starting bankroll':'Commissioner declined entry',delta:approve?allocation:0,at});
+  });
+  return {ok:true};
 });
 export const placeBet = clean(async (req) => {
   const id = uid(req),
