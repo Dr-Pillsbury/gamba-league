@@ -45,10 +45,7 @@ export function funds(balance, opening, staked, week) {
   const reserve = Math.max(0, WEEKS - week) * MINIMUM;
   return {
     reserve,
-    available: Math.max(
-      0,
-      Math.min(balance - reserve, opening - reserve - staked),
-    ),
+    available: Math.max(0, balance - reserve),
     needed: Math.max(0, MINIMUM - staked),
   };
 }

@@ -8,38 +8,28 @@ Firebase web app: `gamba-league`. Season starts **Wednesday, September 9, 2026**
 
 Google Authentication and Firestore are enabled. hood.travis98@gmail.com has verified commissioner access. Sign-in domains and the season document are configured. Cloud Functions remain **undeployed**, as requested. The frontend disables account mutations and betting until config/league.backendEnabled is explicitly enabled after backend validation.
 
-## API-NFL: current access limitation
+## nflverse data
 
-The secret is stored only in ignored .env.local as API_SPORTS_KEY. Never commit it or expose it in frontend code. API-NFL is the American-football product; API-Football is soccer.
+The app now uses free public nflverse CSV files without an API key. The API-SPORTS key has been removed from the local environment and the old API client has been removed. Removing the local key does not revoke it at the provider.
 
-On September 8, 2026, live verification confirmed an active Free account with 100 requests/day. The provider explicitly rejects season 2026 and permits only 2022–2024 on this account. No current games or rosters were imported. No billing or paid plan was activated. One permitted historical game was read to verify data shape and stat labels; it was not imported into the league.
+The 2026 schedule and active rosters were downloaded and checked directly. The adapter matches games by nflverse game_id and players by GSIS ID. It supports passing/rushing/receiving yards and touchdowns, interceptions thrown, receptions, solo tackles and sacks. Total tackles remains commissioner-reviewed until assisted-tackle field semantics are verified. Missing values are never treated as zero. Custom sportsbook rules and freeform/parlay bets remain commissioner-reviewed.
 
-Prepared features include schedules, rosters, position-based props, manually entered sportsbook odds, grading notes and commissioner corrections. Final full-game scores and explicit supported player stats can grade structured bets. Missing stats remain pending. Parlays, freeform selections, custom sportsbook rules and ambiguous total-tackle fields require commissioner review. Choose custom grading for participation, shortened-game or cancellation policies that differ from the app's full-game rules.
+Scheduled settlement is prepared for 10 a.m. America/New_York daily. It only considers games on a prior Eastern calendar day, at least eight hours after kickoff, with both scores present. Player props additionally require an explicit game/player statistic. Unpublished stats stay pending and retry on subsequent daily runs. Roster imports are cached for 24 hours. Commissioner overrides are preserved. Later provider corrections do not silently change already settled bets; use commissioner correction with a reason.
 
-The importer caches rosters for seven days, caps runs at 20 requests, spaces calls to respect 10/minute, and stops at 90 daily requests. Other uses of the key share its provider quota. No automatic import or settlement runs while Cloud Functions are undeployed.
-
-Once current-season access is available, run this local schedule/roster import:
+The owner can refresh schedules and rosters without deploying Cloud Functions:
 
     node scripts/sync-nfl.cjs hood.travis98@gmail.com
 
 ## Backend activation (deferred)
 
-The project uses Spark. Review costs and explicitly decide on Blaze before deployment. Future steps, not executed in this session:
-
-1. Install dependencies in the root and functions folders using npm ci.
-2. Set the API_SPORTS_KEY Firebase Functions secret using the owner account.
-3. Deploy Firestore and functions with the project-local Firebase CLI and --account hood.travis98@gmail.com.
-4. Verify current-season coverage and grading, then enable config/league.dataSyncEnabled and autoSettlementEnabled. The score job runs every six hours.
-5. Test callable functions and set backendEnabled to true before inviting players.
-
-Commissioner corrections require a reason and adjust only the payout difference. Automatic jobs never overwrite them. Do not change the season start after entries exist.
+Cloud Functions remain undeployed on the owner's request. The frontend shows imported data, but betting and scheduled settlement remain disabled. Review Firebase costs before choosing Blaze. After approval, install root/functions dependencies, deploy the backend with the owner account, and test callable functions. No sports API secret is needed. Enable config/league.dataSyncEnabled, autoSettlementEnabled and backendEnabled only after verification.
 
 ## League accounting
 
 - All money is stored as integer cents. Initial balance: 18000; weekly minimum: 1000.
 - Immediate stake debit. Positive American odds profit = stake × odds / 100; negative odds profit = stake × 100 / absolute odds. Profit rounds to cents. Wins return stake + profit; pushes and voids refund stake; losses return zero.
-- Reserve = 1000 × remaining weeks. Available amount = max(0, min(current balance − reserve, Wednesday opening balance − reserve − weekly stake)). This keeps Week 1’s total at $10 even if an early bet wins.
-- Cashflow at or after Wednesday midnight cannot inflate that week’s opening allowance. Pending potential payouts cannot be spent. Commissioner's downward corrections can create a reserve shortfall; new betting freezes until funds recover.
+- Reserve = 1000 × remaining weeks. Available amount = max(0, current balance − reserve). Week 1 starts at $10; settled returns immediately become spendable within the same week while the future-week reserve stays protected.
+- Pending potential payouts cannot be spent. Commissioner corrections may create a reserve shortfall; new betting freezes until funds recover.
 - The weekly minimum may be split into smaller bets. Pushes count; voids do not. A void restores weekly stake capacity within the current cash limit. Missed minimums are flagged without an automatic penalty.
 - Bet submissions use server time, are immutable, and require an upcoming start inside the current week. Custom events rely on the supplied start time and commissioner review. For a parlay, use the earliest leg start.
 - Transactions serialize concurrent bets against the player's wallet. A client request ID makes retries idempotent. Settlement is transactional and repeat-safe.
@@ -65,7 +55,8 @@ The optional WebMCP `view_league_bets` tool changes the same bet-feed tab and fi
 - [Firebase callable functions](https://firebase.google.com/docs/functions/callable)
 - [Firestore transactions](https://firebase.google.com/docs/firestore/manage-data/transactions)
 - [Firebase functions setup and deployment](https://firebase.google.com/docs/functions/get-started)
-- [API-NFL](https://api-sports.io/sports/nfl)
+- [nflverse data and attribution](https://github.com/nflverse/nflverse-data)
+- [nflverse update schedule](https://nflreadr.nflverse.com/articles/nflverse_data_schedule.html)
 
 
 ## Setup helper

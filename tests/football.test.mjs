@@ -8,7 +8,6 @@ import {
   propsForPosition,
   numericStat,
 } from '../functions/football.js';
-import { createApiNflClient, syncNfl } from '../functions/api-nfl.js';
 import { grade } from '../functions/rules.js';
 // Synthetic contract fixtures; live provider validation is separately required.
 const gameRow = {
@@ -141,90 +140,4 @@ test('solo and total tackles stay distinct, and fractional sacks are retained', 
   assert.equal(p.values.total_tackles, 9);
   assert.equal(p.values.solo_tackles, 6);
   assert.equal(p.values.sacks, 0.5);
-});
-test('API errors at HTTP 200 and pagination fail closed', async () => {
-  for (const body of [
-    { errors: { plan: 'restricted' }, response: [] },
-    { errors: [], response: [], paging: { total: 2 } },
-  ]) {
-    const request = createApiNflClient({
-      key: 'test',
-      reserveRequest: async () => {},
-      recordRemaining: async () => {},
-      fetchImpl: async () => new Response(JSON.stringify(body)),
-    });
-    await assert.rejects(request('games', {}));
-  }
-});
-test('quota reservation prevents a request and rate pacing is shared per importer', async () => {
-  let fetched = 0;
-  const request = createApiNflClient({
-    key: 'test',
-    reserveRequest: async () => {
-      throw Error('quota');
-    },
-    recordRemaining: async () => {},
-    fetchImpl: async () => {
-      fetched++;
-    },
-  });
-  await assert.rejects(request('games', {}), /quota/);
-  assert.equal(fetched, 0);
-  let clock = 10000,
-    waited = 0;
-  const client = createApiNflClient({
-    key: 'test',
-    reserveRequest: async () => {},
-    recordRemaining: async () => {},
-    now: () => clock,
-    pause: async (ms) => {
-      clock += ms;
-      waited += ms;
-    },
-    fetchImpl: async () => new Response('{"response":[],"errors":[]}'),
-  });
-  await client('games', {});
-  await client('games', {});
-  assert.equal(waited, 6500);
-});
-test('cached season import fetches schedule once and reuses fresh rosters', async () => {
-  const now = 1789000000000,
-    docs = new Map([
-      [
-        'sync/nfl',
-        { season: 2026, coverage: { players: true }, coverageAt: now },
-      ],
-      ['rosters/2026_2', { syncedAt: now }],
-      ['rosters/2026_3', { syncedAt: now }],
-    ]),
-    calls = [];
-  const request = async (path) => {
-    calls.push(path);
-    return [{ ...gameRow, game: { ...gameRow.game, status: { short: 'NS' } } }];
-  };
-  await syncNfl({
-    store: {
-      get: async (p) => docs.get(p),
-      set: async (p, v) => docs.set(p, v),
-    },
-    request,
-    season: 2026,
-    now,
-  });
-  assert.deepEqual(calls, ['games']);
-  assert.ok(docs.has('events/nfl_1'));
-});
-test('roster imports preserve position, season and team IDs', () => {
-  assert.deepEqual(
-    normalizeRoster([{ id: 8, name: 'QB', position: 'QB' }], 2, 2026)[0],
-    {
-      id: '8',
-      name: 'QB',
-      position: 'QB',
-      number: null,
-      rosterGroup: '',
-      teamId: 2,
-      season: 2026,
-    },
-  );
 });

@@ -2,7 +2,6 @@
 const { selectAccount, setActiveAccount } = require('firebase-tools/lib/auth');
 const { requireAuth } = require('firebase-tools/lib/requireAuth');
 const { Client } = require('firebase-tools/lib/apiv2');
-const { existsSync } = require('node:fs');
 const project = 'gamba-league';
 function encode(value) {
   if (value === null) return { nullValue: null };
@@ -39,9 +38,6 @@ function decode(value) {
   return value.stringValue;
 }
 async function main() {
-  if (existsSync('.env.local')) process.loadEnvFile('.env.local');
-  if (!process.env.API_SPORTS_KEY?.trim())
-    throw Error('Add your API-NFL key to API_SPORTS_KEY in .env.local.');
   const email = process.argv[2] ?? 'hood.travis98@gmail.com';
   const options = { project, nonInteractive: true };
   setActiveAccount(options, selectAccount(email, process.cwd()));
@@ -99,7 +95,6 @@ async function main() {
   const { runNflImport } = await import('../functions/nfl-sync.js');
   const result = await runNflImport({
     store,
-    key: process.env.API_SPORTS_KEY,
     season: Number(config.startDate.slice(0, 4)),
   });
   console.log(JSON.stringify(result));

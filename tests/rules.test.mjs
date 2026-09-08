@@ -18,13 +18,15 @@ const bet = {
   sportsbook: 'FanDuel',
   market: 'Spread',
 };
-test('week one protects $170 and caps total stakes even after an early win', () => {
+test('week one protects $170 and unlocks settled returns during the same week', () => {
   assert.deepEqual(funds(18000, 18000, 0, 1), {
     reserve: 17000,
     available: 1000,
     needed: 1000,
   });
-  assert.equal(funds(18909, 18000, 1000, 1).available, 0);
+  assert.equal(funds(18909, 18000, 1000, 1).available, 1909);
+  assert.equal(validateBet({ ...bet, stake: 1909 }, now, c, 18909, 18000, 1000), 1);
+  assert.throws(() => validateBet({ ...bet, stake: 1910 }, now, c, 18909, 18000, 1000));
   assert.throws(() =>
     validateBet({ ...bet, stake: 1001 }, now, c, 18000, 18000, 0),
   );

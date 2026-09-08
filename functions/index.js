@@ -2,7 +2,6 @@ import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
-import { defineSecret } from 'firebase-functions/params';
 import { propsForPosition, gradeProp } from './football.js';
 import { runNflImport } from './nfl-sync.js';
 import {
@@ -154,11 +153,11 @@ export const placeBet = clean(async (req) => {
       throw Error(
         'Describe the sportsbook rule that needs commissioner review.',
       );
-    if (event?.provider === 'api-nfl' && event.status !== 'NS')
+    if (event?.provider === 'nflverse' && event.status !== 'NS')
       throw Error('Only scheduled, not-started games can accept bets.');
-    if (event?.provider === 'api-nfl' && bet.market === 'Player prop') {
+    if (event?.provider === 'nflverse' && bet.market === 'Player prop') {
       if (
-        !/^\d+$/.test(String(input.playerId)) ||
+        !/^00-\d{7}$/.test(String(input.playerId)) ||
         !['over', 'under'].includes(bet.side)
       )
         throw Error('Choose a player and over/under.');
@@ -382,13 +381,11 @@ export const refreshStandings = clean(async (req) => {
   await closeWeeks();
   return { ok: true };
 });
-const scoresKey = defineSecret('API_SPORTS_KEY');
 export const syncFootballScores = onSchedule(
   {
-    schedule: 'every 6 hours',
+    schedule: '0 10 * * *',
     timeZone: 'America/New_York',
     region: 'us-central1',
-    secrets: [scoresKey],
     retryCount: 0,
     timeoutSeconds: 540,
     maxInstances: 1,
@@ -414,7 +411,6 @@ export const syncFootballScores = onSchedule(
       .get();
     await runNflImport({
       store,
-      key: scoresKey.value(),
       season: Number(c.startDate.slice(0, 4)),
       pendingBets: pending.docs.map((d) => d.data()),
     });
@@ -442,8 +438,8 @@ export const syncFootballScores = onSchedule(
         await settle(
           doc.id,
           result,
-          'api-nfl',
-          'API-NFL final ' +
+          'nflverse',
+          'nflverse next-day final ' +
             (b.market === 'Player prop' ? 'player statistic' : 'score') +
             ' · full game including overtime',
           true,

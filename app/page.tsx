@@ -238,11 +238,11 @@ export default function Home() {
   const selectedPlayer = gamePlayers.find((p) => p.id === playerId);
   const availableProps = propsForPosition(selectedPlayer?.position);
   const structuredProp =
-    chosenEvent?.provider === 'api-nfl' && market === 'Player prop';
+    chosenEvent?.provider === 'nflverse' && market === 'Player prop';
   const schedule = events
     .filter(
       (e) =>
-        e.provider === 'api-nfl' &&
+        e.provider === 'nflverse' &&
         Date.parse(e.commence_time) >= weekStart(start, week) &&
         Date.parse(e.commence_time) < weekStart(start, week + 1),
     )
@@ -535,13 +535,13 @@ export default function Home() {
               <section className="panel">
                 <div className="panel-title">
                   <h2>Week {week} schedule</h2>
-                  <span className="tag">API-NFL</span>
+                  <span className="tag">nflverse</span>
                 </div>
                 <p className="hint">
                   {config?.lastScoresSyncAt
                     ? 'Last refreshed ' + date(config.lastScoresSyncAt)
                     : 'Waiting for the first schedule import.'}{' '}
-                  Shared updates keep the league within the free data allowance.
+                  Schedules and rosters from nflverse. Results settle the next day when final data is available.
                 </p>
                 {schedule.length ? (
                   schedule.map((game) => (
@@ -593,7 +593,7 @@ export default function Home() {
                         : 'Sign in to see the schedule.'}
                     </h3>
                     <p>
-                      Games and team rosters appear here after the first API-NFL
+                      Games and team rosters appear here after the first nflverse
                       import.
                     </p>
                   </div>
@@ -813,9 +813,9 @@ export default function Home() {
                   </li>
                   <li>
                     <strong>Keep future weeks funded.</strong> Reserve $10 for
-                    every remaining week. Week 1 allows a total of $10 in
-                    stakes. Winnings settled during a week become extra spending
-                    allowance the following Wednesday.
+                    every remaining week. Week 1 starts with $10 available.
+                    Settled returns can be used again during the same week;
+                    pending payouts cannot be spent.
                   </li>
                   <li>
                     <strong>Place bets before the event starts.</strong> Odds
@@ -953,10 +953,9 @@ export default function Home() {
                       : ''}
                   </p>
                   <p className="hint">
-                    Data provider: API-NFL free tier · 100 requests/day. Shared
-                    imports stop at 90/day, with a maximum of 20 requests per
-                    refresh. Key access and live coverage must be verified
-                    before automatic results are activated.
+                    Data provider: nflverse · free public data, no API key.
+                    Next-day settlement is scheduled for 10 a.m. Eastern when
+                    enabled. Missing stats require commissioner review.
                   </p>
                   {config?.dataSyncError && (
                     <p className="notice error">{config.dataSyncError}</p>
@@ -1020,7 +1019,7 @@ export default function Home() {
                       .filter(
                         (e) =>
                           !e.completed &&
-                          (e.provider !== 'api-nfl' || e.status === 'NS') &&
+                          (e.provider !== 'nflverse' || e.status === 'NS') &&
                           Date.parse(e.commence_time) > now &&
                           Date.parse(e.commence_time) <
                             weekStart(start, week + 1),
@@ -1316,7 +1315,7 @@ export default function Home() {
       </div>
       <footer>
         PLAY MONEY. REAL BRAGGING RIGHTS.
-        <span>Wednesday → Tuesday · Eastern time</span>
+        <span>Wednesday → Tuesday · Eastern time · Data: <a href="https://github.com/nflverse/nflverse-data" target="_blank" rel="noreferrer">nflverse</a></span>
       </footer>
     </main>
   );
