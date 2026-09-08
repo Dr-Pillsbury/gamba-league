@@ -3,6 +3,8 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { defineSecret } from 'firebase-functions/params';
+import { propsForPosition, gradeProp } from './football.js';
+import { runNflImport } from './nfl-sync.js';
 import {
   INITIAL,
   weekAt,
@@ -138,7 +140,61 @@ export const placeBet = clean(async (req) => {
       eventId: event ? input.eventId : null,
       side: input.side ?? null,
       line: input.line ?? null,
+      gradingRule: input.gradingRule ?? 'full-game',
+      gradingNotes: String(input.gradingNotes ?? '').trim(),
+      playerId: null,
+      propKey: null,
     };
+    if (
+      !['full-game', 'custom'].includes(bet.gradingRule) ||
+      bet.gradingNotes.length > 500
+    )
+      throw Error('Choose a grading rule and limit notes to 500 characters.');
+    if (bet.gradingRule === 'custom' && bet.gradingNotes.length < 3)
+      throw Error(
+        'Describe the sportsbook rule that needs commissioner review.',
+      );
+    if (event?.provider === 'api-nfl' && event.status !== 'NS')
+      throw Error('Only scheduled, not-started games can accept bets.');
+    if (event?.provider === 'api-nfl' && bet.market === 'Player prop') {
+      if (
+        !/^\d+$/.test(String(input.playerId)) ||
+        !['over', 'under'].includes(bet.side)
+      )
+        throw Error('Choose a player and over/under.');
+      if (
+        !Number.isFinite(bet.line) ||
+        bet.line < 0 ||
+        bet.line > 10000 ||
+        !Number.isInteger(bet.line * 2)
+      )
+        throw Error('Enter a nonnegative whole or half-point prop line.');
+      const rosters = await Promise.all(
+        [event.homeTeamId, event.awayTeamId].map((id) =>
+          tx.get(db.doc('rosters/' + event.season + '_' + id)),
+        ),
+      );
+      const player = rosters
+        .flatMap((r) => r.data()?.players ?? [])
+        .find((p) => p.id === String(input.playerId));
+      const prop =
+        player &&
+        propsForPosition(player.position).find((p) => p.key === input.propKey);
+      if (!player || !prop)
+        throw Error(
+          'Choose a supported player and position-specific prop from this game.',
+        );
+      bet.playerId = String(input.playerId);
+      bet.propKey = prop.key;
+      bet.selection =
+        player.name +
+        ' ' +
+        bet.side +
+        ' ' +
+        bet.line +
+        ' ' +
+        prop.label.toLowerCase();
+    }
     if (event && ['Moneyline', 'Spread', 'Total'].includes(bet.market)) {
       const sides =
         bet.market === 'Total' ? ['over', 'under'] : ['home', 'away'];
@@ -175,7 +231,10 @@ export const placeBet = clean(async (req) => {
       paid: 0,
       createdAt: now,
       autoEligible:
-        !!event && ['Moneyline', 'Spread', 'Total'].includes(bet.market),
+        !!event &&
+        bet.gradingRule === 'full-game' &&
+        (['Moneyline', 'Spread', 'Total'].includes(bet.market) ||
+          !!bet.propKey),
       manualOverride: false,
     });
     tx.update(m.ref, { balance: m.data().balance - bet.stake });
@@ -323,58 +382,77 @@ export const refreshStandings = clean(async (req) => {
   await closeWeeks();
   return { ok: true };
 });
-const scoresKey = defineSecret('ODDS_API_KEY');
+const scoresKey = defineSecret('API_SPORTS_KEY');
 export const syncFootballScores = onSchedule(
   {
     schedule: 'every 6 hours',
     timeZone: 'America/New_York',
     region: 'us-central1',
     secrets: [scoresKey],
-    retryCount: 2,
+    retryCount: 0,
+    timeoutSeconds: 540,
+    maxInstances: 1,
   },
   async () => {
     const c = await config();
+    if (!c.dataSyncEnabled) return;
+    const store = {
+      get: async (path) => (await db.doc(path).get()).data() ?? null,
+      set: async (path, value) => {
+        await db.doc(path).set(value);
+      },
+      update: (path, fn) =>
+        db.runTransaction(async (tx) => {
+          const ref = db.doc(path),
+            current = await tx.get(ref);
+          tx.set(ref, fn(current.data() ?? null));
+        }),
+    };
+    const pending = await db
+      .collection('bets')
+      .where('status', '==', 'pending')
+      .get();
+    await runNflImport({
+      store,
+      key: scoresKey.value(),
+      season: Number(c.startDate.slice(0, 4)),
+      pendingBets: pending.docs.map((d) => d.data()),
+    });
     if (!c.autoSettlementEnabled) return;
-    const response = await fetch(
-      'https://api.the-odds-api.com/v4/sports/americanfootball_nfl/scores/?daysFrom=3&apiKey=' +
-        encodeURIComponent(scoresKey.value()),
-      { signal: AbortSignal.timeout(20000) },
-    );
-    if (!response.ok)
-      throw Error('Scores provider returned HTTP ' + response.status);
-    const events = await response.json();
-    if (!Array.isArray(events)) throw Error('Invalid scores response');
-    for (const event of events) {
+    for (const doc of pending.docs) {
+      const b = doc.data();
       if (
-        !/^[a-zA-Z0-9_-]+$/.test(event.id) ||
-        !event.home_team ||
-        !event.away_team ||
-        !Number.isFinite(Date.parse(event.commence_time))
+        !b.autoEligible ||
+        b.manualOverride ||
+        !b.eventId ||
+        b.gradingRule !== 'full-game'
       )
         continue;
-      await db
-        .doc('events/' + event.id)
-        .set({ ...event, syncedAt: Date.now() });
-      if (!event.completed) continue;
-      const bets = await db
-        .collection('bets')
-        .where('eventId', '==', event.id)
-        .get();
-      for (const doc of bets.docs) {
-        const b = doc.data();
-        if (!b.autoEligible || b.status !== 'pending' || b.manualOverride)
-          continue;
-        const result = grade(b, event);
-        if (result)
-          await settle(
-            doc.id,
-            result,
-            'scores-provider',
-            'Full-game final score via The Odds API (includes overtime)',
-            true,
-          );
-      }
+      const event = await store.get('events/' + b.eventId);
+      if (!event?.completed) continue;
+      const stats =
+        b.market === 'Player prop'
+          ? await store.get('gameStats/' + b.eventId)
+          : null;
+      const result =
+        b.market === 'Player prop'
+          ? gradeProp(b, event, stats)
+          : grade(b, event);
+      if (result)
+        await settle(
+          doc.id,
+          result,
+          'api-nfl',
+          'API-NFL final ' +
+            (b.market === 'Player prop' ? 'player statistic' : 'score') +
+            ' · full game including overtime',
+          true,
+        );
+      else
+        await doc.ref.update({
+          reviewReason:
+            'Final game, but the required statistic is not available. Commissioner review needed.',
+        });
     }
-    await configRef.update({ lastScoresSyncAt: Date.now() });
   },
 );

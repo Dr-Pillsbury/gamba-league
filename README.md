@@ -6,54 +6,33 @@ A single-season football picks league. Google authentication and Cloud Firestore
 
 Firebase web app: `gamba-league`. Season starts **Wednesday, September 9, 2026**, with 18 weekly periods. The web configuration is public identification, not an administrative credential. Analytics is not enabled.
 
-Google Authentication and the production-mode Firestore database have been enabled by the project owner. Server deployment and commissioner configuration still need the steps below. No real balances or wagers should be entered until that setup is complete.
+Google Authentication and Firestore are enabled. hood.travis98@gmail.com has verified commissioner access. Sign-in domains and the season document are configured. Cloud Functions remain **undeployed**, as requested. The frontend disables account mutations and betting until config/league.backendEnabled is explicitly enabled after backend validation.
 
-## Firebase console steps
+## API-NFL: current access limitation
 
-1. Authentication → Settings → Authorized domains: add `localhost` and `gamba-league.doc-pillsbury.chatgpt.site`. Enter hostnames without `https://` or a path.
-2. Sign into the app once with Google. Authentication → Users will then show your **User UID**; copy it.
-3. Firestore Database → Data → Start collection: collection ID `config`, document ID `league`. Add these fields with the exact types:
+The secret is stored only in ignored .env.local as API_SPORTS_KEY. Never commit it or expose it in frontend code. API-NFL is the American-football product; API-Football is soccer.
 
-   | Field | Type | Value |
-   | --- | --- | --- |
-   | `startDate` | string | `2026-09-09` |
-   | `commissionerUids` | array | one string: your Firebase User UID |
-   | `autoSettlementEnabled` | boolean | `false` initially |
+On September 8, 2026, live verification confirmed an active Free account with 100 requests/day. The provider explicitly rejects season 2026 and permits only 2022–2024 on this account. No current games or rosters were imported. No billing or paid plan was activated. One permitted historical game was read to verify data shape and stat labels; it was not imported into the league.
 
-   Configure this using the Firebase console as project owner. Clients cannot grant themselves commissioner access. Do not change the start date once the league has entries. All Google users who can reach the site may join before the end of Week 1; site sharing controls determine the audience.
-4. Deploy Firestore rules and the server functions below. Do not switch Firestore to test mode. The supplied rules permit league reads and deny all direct client writes.
-5. Cloud Functions deployment requires the Firebase **Blaze** plan. Enable billing yourself in the console if needed; set a budget alert. The app does not enable billing for you.
+Prepared features include schedules, rosters, position-based props, manually entered sportsbook odds, grading notes and commissioner corrections. Final full-game scores and explicit supported player stats can grade structured bets. Missing stats remain pending. Parlays, freeform selections, custom sportsbook rules and ambiguous total-tackle fields require commissioner review. Choose custom grading for participation, shortened-game or cancellation policies that differ from the app's full-game rules.
 
-## Deploy the backend from this project
+The importer caches rosters for seven days, caps runs at 20 requests, spaces calls to respect 10/minute, and stops at 90 daily requests. Other uses of the key share its provider quota. No automatic import or settlement runs while Cloud Functions are undeployed.
 
-Dependencies have been installed. PowerShell commands below use the local Firebase CLI and avoid this computer’s broken global npm shim:
+Once current-season access is available, run this local schedule/roster import:
 
-```powershell
-.\scripts\firebase.ps1 login
-.\scripts\firebase.ps1 deploy --project gamba-league --only "firestore,functions:joinLeague,functions:placeBet,functions:settleBet,functions:closeLeagueWeeks,functions:refreshStandings"
-```
+    node scripts/sync-nfl.cjs hood.travis98@gmail.com
 
-Sign in through Google's browser page. Do not send service-account private keys, tokens, or passwords in chat. If deploying from a fresh checkout, run `npm ci` in the root and in `functions` first. The cloud runtime uses Node.js 22; local development also works on Node.js 24.
+## Backend activation (deferred)
 
-## Automatic score settlement (optional activation)
+The project uses Spark. Review costs and explicitly decide on Blaze before deployment. Future steps, not executed in this session:
 
-The app accepts custom selections, props, parlays and other sportsbook markets. These are reviewed by the commissioner because freeform descriptions cannot safely be graded from a final game score.
+1. Install dependencies in the root and functions folders using npm ci.
+2. Set the API_SPORTS_KEY Firebase Functions secret using the owner account.
+3. Deploy Firestore and functions with the project-local Firebase CLI and --account hood.travis98@gmail.com.
+4. Verify current-season coverage and grading, then enable config/league.dataSyncEnabled and autoSettlementEnabled. The score job runs every six hours.
+5. Test callable functions and set backendEnabled to true before inviting players.
 
-For automatic full-game NFL moneylines, spreads, and totals:
-
-1. Obtain a **The Odds API** key with access to its NFL scores endpoint. Keep it server-side.
-2. Set the secret interactively:
-
-   ```powershell
-   .\scripts\firebase.ps1 functions:secrets:set ODDS_API_KEY --project gamba-league
-   .\scripts\firebase.ps1 deploy --project gamba-league --only functions:syncFootballScores
-   ```
-
-3. Set `config/league.autoSettlementEnabled` to `true`. The schedule runs every six hours and requests the last three days of completed games. It also imports upcoming events into the game picker. A new deployment does not immediately run the schedule; use Google Cloud Scheduler's **Run now** if an immediate first sync is needed.
-4. Choose an imported game and a structured market in the app. Scores are matched by provider event ID, not guessed from free text. Only final, complete scores can settle a bet. Full-game bets include overtime; two-way moneyline ties push. Other sportsbook rules, partial periods, canceled or suspended games, unmatched events, props, and parlays require commissioner review. A prolonged feed outage may exceed the provider’s three-day lookback; review remaining pending bets manually.
-5. Commissioner corrections include a reason, are written to audit history, and adjust only the difference between old and new payouts. Automatic jobs never overwrite a commissioner result.
-
-A player-stat provider and structured prop/leg mapping are needed to extend automatic settlement to player props and parlays. The current version does not claim to verify arbitrary freeform bets automatically.
+Commissioner corrections require a reason and adjust only the payout difference. Automatic jobs never overwrite them. Do not change the season start after entries exist.
 
 ## League accounting
 
@@ -71,7 +50,7 @@ A player-stat provider and structured prop/leg mapping are needed to extend auto
 
 ```powershell
 node "C:/Program Files/nodejs/node_modules/npm/bin/npm-cli.js" run dev
-node --test tests/rules.test.mjs
+node --test tests/*.test.mjs
 node node_modules/typescript/bin/tsc --noEmit
 node "C:/Program Files/nodejs/node_modules/npm/bin/npm-cli.js" run build
 ```
@@ -86,13 +65,11 @@ The optional WebMCP `view_league_bets` tool changes the same bet-feed tab and fi
 - [Firebase callable functions](https://firebase.google.com/docs/functions/callable)
 - [Firestore transactions](https://firebase.google.com/docs/firestore/manage-data/transactions)
 - [Firebase functions setup and deployment](https://firebase.google.com/docs/functions/get-started)
-- [The Odds API scores documentation](https://the-odds-api.com/liveapi/guides/v4/#get-scores)
+- [API-NFL](https://api-sports.io/sports/nfl)
 
 
-## Setup progress in this session
+## Setup helper
 
-The season document and Google sign-in domains have now been configured through the project owner's authenticated Firebase CLI account. The commissioner UID is pending the owner's first Google sign-in at the website. After that sign-in, run `node scripts/setup-firebase.cjs hood.travis98@gmail.com` to fill an empty commissioner list without resetting existing league data.
+Run node scripts/setup-firebase.cjs hood.travis98@gmail.com to verify commissioner membership, fill an empty commissioner list and add sign-in domains without resetting league data. Firestore rules deny direct client writes to balances, bets and imported football data.
 
-The initial server deployment was blocked by the project's Spark plan. Blaze must be enabled by the owner before deploying Cloud Functions. Use `--account hood.travis98@gmail.com` with the deployment commands if another Firebase CLI login is the global default.
-
-Compatible framework security updates removed the high-severity advisories reported by the starter. Remaining moderate advisories are in upstream Firebase/CLI dependency chains; forced major-version downgrades were not applied. Review those advisories before broader production use.
+Framework updates removed the starter's high-severity advisories. Remaining moderate advisories are in upstream Firebase/CLI dependencies.

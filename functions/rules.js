@@ -100,6 +100,12 @@ export function validateBet(data, now, config, balance, opening, staked) {
 }
 export function grade(bet, event) {
   if (!event.completed || !Array.isArray(event.scores)) return null;
+  if (
+    event.scores.some(
+      (s) => s.score === null || s.score === undefined || s.score === '',
+    )
+  )
+    return null;
   const home = Number(
       event.scores.find((s) => s.name === event.home_team)?.score,
     ),

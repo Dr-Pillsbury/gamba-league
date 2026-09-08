@@ -14,6 +14,7 @@ import {
   CircleAlert,
 } from 'lucide-react';
 import { auth, db, call, login } from '@/lib/firebase';
+import { propsForPosition } from '@/functions/football.js';
 import {
   funds,
   INITIAL,
@@ -99,6 +100,7 @@ export default function Home() {
     [ledger, setLedger] = useState<RecordData[]>([]),
     [snapshots, setSnapshots] = useState<RecordData[]>([]),
     [events, setEvents] = useState<RecordData[]>([]),
+    [rosters, setRosters] = useState<RecordData[]>([]),
     [audit, setAudit] = useState<RecordData[]>([]);
   const [now, setNow] = useState(0),
     [busy, setBusy] = useState(false),
@@ -117,12 +119,17 @@ export default function Home() {
     [eventId, setEventId] = useState('manual'),
     [side, setSide] = useState('home'),
     [line, setLine] = useState('');
+  const [playerId, setPlayerId] = useState(''),
+    [propKey, setPropKey] = useState('');
+  const [gradingRule, setGradingRule] = useState('full-game'),
+    [gradingNotes, setGradingNotes] = useState('');
   const [selectedBet, setSelectedBet] = useState(''),
     [result, setResult] = useState('won'),
     [reason, setReason] = useState('');
   const request = useRef({ signature: '', id: '' });
   const me = members.find((m) => m.id === user?.uid),
     commissioner = !!user && !!config?.commissionerUids?.includes(user.uid);
+  const backendEnabled = config?.backendEnabled === true;
   useEffect(() => {
     setNow(Date.now());
     const t = setInterval(() => setNow(Date.now()), 30000);
@@ -140,6 +147,7 @@ export default function Home() {
     setConfig(null);
     setMembers([]);
     setEvents([]);
+    setRosters([]);
     if (!user) return;
     const fail = (e: Error) =>
       setError(
@@ -162,6 +170,11 @@ export default function Home() {
         (s) => setEvents(s.docs.map((d) => ({ id: d.id, ...d.data() }))),
         fail,
       ),
+      onSnapshot(
+        collection(db, 'rosters'),
+        (s) => setRosters(s.docs.map((d) => ({ id: d.id, ...d.data() }))),
+        fail,
+      ),
     ];
     return () => stops.forEach((s) => s());
   }, [user]);
@@ -170,7 +183,7 @@ export default function Home() {
     setLedger([]);
     setSnapshots([]);
     setAudit([]);
-    if (!me?.id) return;
+    if (!me?.id && !commissioner) return;
     const fail = (e: Error) =>
       setError('Unable to load league activity. ' + e.message);
     const stops = [
@@ -189,7 +202,7 @@ export default function Home() {
       ),
     );
     return () => stops.forEach((s) => s());
-  }, [me?.id]);
+  }, [me?.id, commissioner]);
   const start = config?.startDate ?? '2026-09-09',
     actualWeek = now ? weekAt(now, start) : 0,
     week = Math.max(1, Math.min(18, actualWeek)),
@@ -214,6 +227,26 @@ export default function Home() {
       Number(stake) > 0
         ? payout(Math.round(Number(stake) * 100), Number(odds), 'won')
         : 0;
+  const gamePlayers = rosters
+    .filter(
+      (r) =>
+        r.season === chosenEvent?.season &&
+        [chosenEvent?.homeTeamId, chosenEvent?.awayTeamId].includes(r.teamId),
+    )
+    .flatMap((r) => r.players ?? [])
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const selectedPlayer = gamePlayers.find((p) => p.id === playerId);
+  const availableProps = propsForPosition(selectedPlayer?.position);
+  const structuredProp =
+    chosenEvent?.provider === 'api-nfl' && market === 'Player prop';
+  const schedule = events
+    .filter(
+      (e) =>
+        e.provider === 'api-nfl' &&
+        Date.parse(e.commence_time) >= weekStart(start, week) &&
+        Date.parse(e.commence_time) < weekStart(start, week + 1),
+    )
+    .sort((a, b) => Date.parse(a.commence_time) - Date.parse(b.commence_time));
   const rows =
     viewWeek === 'live'
       ? [...members]
@@ -270,7 +303,8 @@ export default function Home() {
       return;
     }
     const payload = {
-      selection: structured ? 'Structured game pick' : selection,
+      selection:
+        structured || structuredProp ? 'Structured game pick' : selection,
       sportsbook,
       market,
       odds: Number(odds),
@@ -279,8 +313,15 @@ export default function Home() {
         ? Date.parse(chosenEvent.commence_time)
         : Date.parse(startsAt),
       eventId: eventId === 'manual' ? null : eventId,
-      side: structured ? side : null,
-      line: structured && market !== 'Moneyline' ? Number(line) : null,
+      side: structured || structuredProp ? side : null,
+      line:
+        (structured && market !== 'Moneyline') || structuredProp
+          ? Number(line)
+          : null,
+      playerId: structuredProp ? playerId : null,
+      propKey: structuredProp ? propKey : null,
+      gradingRule,
+      gradingNotes,
     };
     const signature = JSON.stringify(payload);
     if (request.current.signature !== signature)
@@ -408,6 +449,16 @@ export default function Home() {
           commissioner still needs to configure this season.
         </div>
       )}
+      {user && config && !backendEnabled && (
+        <div className="notice">
+          <Clock size={20} />
+          <span>
+            League preview: betting and result changes are paused until the
+            commissioner activates the server.{' '}
+            {commissioner && 'Your commissioner access is active.'}
+          </span>
+        </div>
+      )}
       {user && !me && config && (
         <form
           className="join"
@@ -439,7 +490,10 @@ export default function Home() {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
           />
-          <Button disabled={busy || actualWeek > 1} type="submit">
+          <Button
+            disabled={busy || actualWeek > 1 || !backendEnabled}
+            type="submit"
+          >
             Join league
           </Button>
         </form>
@@ -471,11 +525,81 @@ export default function Home() {
             <TabsList variant="line" className="league-tabs">
               <TabsTrigger value="board">Standings</TabsTrigger>
               <TabsTrigger value="bets">Bet feed</TabsTrigger>
+              <TabsTrigger value="schedule">Games & players</TabsTrigger>
               <TabsTrigger value="rules">League rules</TabsTrigger>
               {commissioner && (
                 <TabsTrigger value="commissioner">Commissioner</TabsTrigger>
               )}
             </TabsList>
+            <TabsContent value="schedule">
+              <section className="panel">
+                <div className="panel-title">
+                  <h2>Week {week} schedule</h2>
+                  <span className="tag">API-NFL</span>
+                </div>
+                <p className="hint">
+                  {config?.lastScoresSyncAt
+                    ? 'Last refreshed ' + date(config.lastScoresSyncAt)
+                    : 'Waiting for the first schedule import.'}{' '}
+                  Shared updates keep the league within the free data allowance.
+                </p>
+                {schedule.length ? (
+                  schedule.map((game) => (
+                    <article className="bet-card" key={game.id}>
+                      <div className="bet-meta">
+                        <span>{date(Date.parse(game.commence_time))}</span>
+                        <span className="status">{game.status}</span>
+                      </div>
+                      <h3>
+                        {game.away_team} @ {game.home_team}
+                      </h3>
+                      <p className="hint">
+                        {game.venue || 'Venue not available'}
+                        {game.completed
+                          ? ' · Final: ' +
+                            game.scores
+                              .map((s: any) => s.name + ' ' + s.score)
+                              .join(' / ')
+                          : ''}
+                      </p>
+                      <Button
+                        variant="outline"
+                        disabled={
+                          game.status !== 'NS' ||
+                          Date.parse(game.commence_time) <= now
+                        }
+                        onClick={() => {
+                          setEventId(game.id);
+                          setPlayerId('');
+                          setPropKey('');
+                          document
+                            .getElementById('bet-slip')
+                            ?.scrollIntoView({
+                              behavior: 'smooth',
+                              block: 'start',
+                            });
+                        }}
+                      >
+                        Choose game <ArrowUpRight size={16} />
+                      </Button>
+                    </article>
+                  ))
+                ) : (
+                  <div className="empty">
+                    <Clock size={36} />
+                    <h3>
+                      {user
+                        ? 'Schedule connection is being prepared.'
+                        : 'Sign in to see the schedule.'}
+                    </h3>
+                    <p>
+                      Games and team rosters appear here after the first API-NFL
+                      import.
+                    </p>
+                  </div>
+                )}
+              </section>
+            </TabsContent>
             <TabsContent value="board">
               <section className="panel">
                 <div className="panel-title">
@@ -653,6 +777,14 @@ export default function Home() {
                             : 'Commissioner review · custom market'}
                         {b.settlementReason ? ' — ' + b.settlementReason : ''}
                       </p>
+                      {b.gradingNotes && (
+                        <p className="tiny">
+                          Sportsbook rule: {b.gradingNotes}
+                        </p>
+                      )}
+                      {b.reviewReason && (
+                        <p className="tiny">{b.reviewReason}</p>
+                      )}
                     </article>
                   ))
                 ) : (
@@ -704,12 +836,16 @@ export default function Home() {
                     combined odds and earliest leg start.
                   </li>
                   <li>
-                    <strong>Results are traceable.</strong> Supported
-                    feed-linked full-game moneylines, spreads, and totals can
-                    settle from final scores, including overtime. The
-                    commissioner can correct results with a reason. Corrections
-                    adjust the balance by the difference and may temporarily
-                    reduce funds below the reserve.
+                    <strong>Results are traceable.</strong> Supported player
+                    props use explicit final statistics; missing stats and
+                    absent players require commissioner review. Custom
+                    sportsbook conditions require review, even when the entered
+                    odds match the book. Supported feed-linked full-game
+                    moneylines, spreads, and totals can settle from final
+                    scores, including overtime. The commissioner can correct
+                    results with a reason. Corrections adjust the balance by the
+                    difference and may temporarily reduce funds below the
+                    reserve.
                   </li>
                   <li>
                     <strong>Weekly standings preserve the cutoff.</strong>{' '}
@@ -787,7 +923,7 @@ export default function Home() {
                     <Button
                       type="submit"
                       className="primary"
-                      disabled={busy || !selectedBet}
+                      disabled={busy || !selectedBet || !backendEnabled}
                     >
                       Save result
                     </Button>
@@ -799,7 +935,7 @@ export default function Home() {
                   </p>
                   <Button
                     variant="outline"
-                    disabled={busy}
+                    disabled={busy || !backendEnabled}
                     onClick={() =>
                       action(
                         () => call('refreshStandings'),
@@ -816,6 +952,15 @@ export default function Home() {
                       ? ' · last sync ' + date(config.lastScoresSyncAt)
                       : ''}
                   </p>
+                  <p className="hint">
+                    Data provider: API-NFL free tier · 100 requests/day. Shared
+                    imports stop at 90/day, with a maximum of 20 requests per
+                    refresh. Key access and live coverage must be verified
+                    before automatic results are activated.
+                  </p>
+                  {config?.dataSyncError && (
+                    <p className="notice error">{config.dataSyncError}</p>
+                  )}
                   <h2>Correction history</h2>
                   {[...audit]
                     .sort((a, b) => b.at - a.at)
@@ -837,7 +982,7 @@ export default function Home() {
           </Tabs>
         </div>
         <aside>
-          <section className="panel slip">
+          <section className="panel slip" id="bet-slip">
             <div className="panel-title">
               <h2>
                 <Ticket /> Your bet slip
@@ -851,7 +996,9 @@ export default function Home() {
                   value={market}
                   onChange={(v) => {
                     setMarket(v);
-                    setSide(v === 'Total' ? 'over' : 'home');
+                    setSide(
+                      ['Total', 'Player prop'].includes(v) ? 'over' : 'home',
+                    );
                   }}
                   label="Bet market"
                   items={markets.map((v) => ({ value: v, label: v }))}
@@ -861,7 +1008,11 @@ export default function Home() {
                 Game
                 <Picker
                   value={eventId}
-                  onChange={setEventId}
+                  onChange={(v) => {
+                    setEventId(v);
+                    setPlayerId('');
+                    setPropKey('');
+                  }}
                   label="Game"
                   items={[
                     { value: 'manual', label: 'Enter event manually' },
@@ -869,6 +1020,7 @@ export default function Home() {
                       .filter(
                         (e) =>
                           !e.completed &&
+                          (e.provider !== 'api-nfl' || e.status === 'NS') &&
                           Date.parse(e.commence_time) > now &&
                           Date.parse(e.commence_time) <
                             weekStart(start, week + 1),
@@ -880,7 +1032,97 @@ export default function Home() {
                   ]}
                 />
               </label>
-              {structured ? (
+              {chosenEvent && (
+                <p className="tiny">
+                  {date(Date.parse(chosenEvent.commence_time))} ·{' '}
+                  {chosenEvent.venue || 'Scheduled game'}
+                </p>
+              )}
+              {structuredProp ? (
+                <>
+                  <label>
+                    Player
+                    <Picker
+                      value={playerId}
+                      onChange={(v) => {
+                        setPlayerId(v);
+                        setPropKey('');
+                      }}
+                      label="Player"
+                      items={[
+                        { value: '', label: 'Choose a player' },
+                        ...gamePlayers
+                          .filter((p) => propsForPosition(p.position).length)
+                          .map((p) => ({
+                            value: p.id,
+                            label:
+                              p.name +
+                              ' · ' +
+                              p.position +
+                              ' · ' +
+                              (p.teamId === chosenEvent?.homeTeamId
+                                ? chosenEvent?.home_team
+                                : chosenEvent?.away_team),
+                          })),
+                      ]}
+                    />
+                  </label>
+                  {!gamePlayers.length && (
+                    <p className="hint">
+                      This team’s roster has not been imported yet. You can use
+                      “Enter event manually” for a custom pick.
+                    </p>
+                  )}
+                  <label>
+                    Player prop
+                    <Picker
+                      value={propKey}
+                      onChange={setPropKey}
+                      label="Player statistic"
+                      items={[
+                        { value: '', label: 'Choose a statistic' },
+                        ...availableProps.map((p) => ({
+                          value: p.key,
+                          label: p.label,
+                        })),
+                      ]}
+                    />
+                  </label>
+                  <div className="two">
+                    <label>
+                      Direction
+                      <Picker
+                        value={side}
+                        onChange={setSide}
+                        label="Prop direction"
+                        items={[
+                          { value: 'over', label: 'Over' },
+                          { value: 'under', label: 'Under' },
+                        ]}
+                      />
+                    </label>
+                    <label>
+                      Line
+                      <input
+                        required
+                        min="0"
+                        max="10000"
+                        type="number"
+                        step="0.5"
+                        value={line}
+                        onChange={(e) => setLine(e.target.value)}
+                        placeholder="e.g. 64.5"
+                      />
+                    </label>
+                  </div>
+                  <p className="tiny">
+                    Prop choices are based on position, not a live sportsbook
+                    listing. Enter your sportsbook’s line and odds. Touchdowns
+                    are separated into passing, rushing, and receiving; special
+                    scorer bets use a custom pick.
+                  </p>
+                </>
+              ) : structured ? (
                 <>
                   <label>
                     Selection
@@ -963,6 +1205,36 @@ export default function Home() {
                   placeholder="e.g. FanDuel"
                 />
               </label>
+              <label>
+                Grading rule
+                <Picker
+                  value={gradingRule}
+                  onChange={setGradingRule}
+                  label="Sportsbook grading rule"
+                  items={[
+                    {
+                      value: 'full-game',
+                      label: 'Full game, including overtime',
+                    },
+                    {
+                      value: 'custom',
+                      label: 'Custom sportsbook rule · review',
+                    },
+                  ]}
+                />
+              </label>
+              <label>
+                Sportsbook grading notes{' '}
+                {gradingRule === 'custom' ? '(required)' : '(optional)'}
+                <textarea
+                  required={gradingRule === 'custom'}
+                  minLength={gradingRule === 'custom' ? 3 : 0}
+                  maxLength={500}
+                  value={gradingNotes}
+                  onChange={(e) => setGradingNotes(e.target.value)}
+                  placeholder="e.g. Injury protection, regulation only, or special participation requirements. Choose custom for rules that change the result."
+                />
+              </label>
               <div className="two">
                 <label>
                   American odds
@@ -1002,20 +1274,27 @@ export default function Home() {
                 disabled={
                   busy ||
                   !authReady ||
-                  (!!user && (!me || !inSeason || available === 0))
+                  (!!user &&
+                    (!backendEnabled ||
+                      !me ||
+                      !inSeason ||
+                      available === 0 ||
+                      (structuredProp && (!playerId || !propKey))))
                 }
               >
                 {busy
                   ? 'Working…'
                   : !user
                     ? 'Sign in to place your bet'
-                    : !me
-                      ? 'Join the league first'
-                      : !inSeason
-                        ? 'Betting is not open'
-                        : available === 0
-                          ? 'Weekly allowance used'
-                          : 'Place bet'}{' '}
+                    : !backendEnabled
+                      ? 'Betting server is paused'
+                      : !me
+                        ? 'Join the league first'
+                        : !inSeason
+                          ? 'Betting is not open'
+                          : available === 0
+                            ? 'Weekly allowance used'
+                            : 'Place bet'}{' '}
                 <ArrowUpRight size={17} />
               </Button>
             </form>
