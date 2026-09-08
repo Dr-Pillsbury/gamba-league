@@ -12,7 +12,7 @@ Google Authentication and Firestore are enabled. hood.travis98@gmail.com has ver
 
 The app now uses free public nflverse CSV files without an API key. The API-SPORTS key has been removed from the local environment and the old API client has been removed. Removing the local key does not revoke it at the provider.
 
-The 2026 schedule and active rosters were downloaded and checked directly. The adapter matches games by nflverse game_id and players by GSIS ID. It supports passing/rushing/receiving yards and touchdowns, interceptions thrown, receptions, solo tackles and sacks. Total tackles remains commissioner-reviewed until assisted-tackle field semantics are verified. Missing values are never treated as zero. Custom sportsbook rules and freeform/parlay bets remain commissioner-reviewed.
+The 2026 schedule and active rosters were downloaded and checked directly. The adapter matches games by nflverse game_id and players by GSIS ID. It supports passing/rushing/receiving yards and touchdowns, interceptions thrown, receptions, solo tackles and sacks. Total tackles remains commissioner-reviewed until assisted-tackle field semantics are verified. Missing values are never treated as zero. FanDuel Connecticut is the league default; sportsbook and grading-rule entry fields are removed. Freeform/parlay bets and special FanDuel conditions remain commissioner-reviewed.
 
 Scheduled settlement is prepared for 10 a.m. America/New_York daily. It only considers games on a prior Eastern calendar day, at least eight hours after kickoff, with both scores present. Player props additionally require an explicit game/player statistic. Unpublished stats stay pending and retry on subsequent daily runs. Roster imports are cached for 24 hours. Commissioner overrides are preserved. Later provider corrections do not silently change already settled bets; use commissioner correction with a reason.
 
@@ -64,3 +64,11 @@ The optional WebMCP `view_league_bets` tool changes the same bet-feed tab and fi
 Run node scripts/setup-firebase.cjs hood.travis98@gmail.com to verify commissioner membership, fill an empty commissioner list and add sign-in domains without resetting league data. Firestore rules deny direct client writes to balances, bets and imported football data.
 
 Framework updates removed the starter's high-severity advisories. Remaining moderate advisories are in upstream Firebase/CLI dependencies.
+
+## FanDuel Connecticut and player reviews
+
+New bets pin the July 30, 2026 Connecticut house-rules reference. Ordinary full-game pushes refund the stake. Player stats must also show participation evidence before automatic grading; absent evidence stays pending instead of being treated as a zero-stat loss/win or automatic void. Injury protection eligibility, promotional credits, suspended games and parlay recalculation are not automatically inferred from nflverse. The commissioner verifies those cases against FanDuel's applicable terms; no blanket injury-refund or paid Bet Protect+ enrollment is assumed.
+
+Players can flag their own posted wins/losses with a 3–500 character reason. The flag is transactional, prevents duplicate requests for an already reviewed result, writes audit history and never changes balances. The commissioner queue permits confirming the same result or correcting it; either resolves the request with a reason and records the payout difference. Callable flagBet and settlement changes remain undeployed until backend activation is authorized.
+
+Reference: https://d38ayms4az88sz.cloudfront.net/SB/CT/2026-07-30T12-42-48.html

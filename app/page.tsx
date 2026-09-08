@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { auth, db, call, login } from '@/lib/firebase';
 import { propsForPosition } from '@/functions/football.js';
+import { LEAGUE_RULES } from '@/functions/reviews.js';
 import {
   funds,
   INITIAL,
@@ -111,7 +112,6 @@ export default function Home() {
     [viewWeek, setViewWeek] = useState('live'),
     [filter, setFilter] = useState('all');
   const [selection, setSelection] = useState(''),
-    [sportsbook, setSportsbook] = useState('FanDuel'),
     [market, setMarket] = useState('Moneyline'),
     [odds, setOdds] = useState('-110'),
     [stake, setStake] = useState('10.00'),
@@ -121,8 +121,8 @@ export default function Home() {
     [line, setLine] = useState('');
   const [playerId, setPlayerId] = useState(''),
     [propKey, setPropKey] = useState('');
-  const [gradingRule, setGradingRule] = useState('full-game'),
-    [gradingNotes, setGradingNotes] = useState('');
+  const [flaggingBet, setFlaggingBet] = useState(''),
+    [flagReason, setFlagReason] = useState('');
   const [selectedBet, setSelectedBet] = useState(''),
     [result, setResult] = useState('won'),
     [reason, setReason] = useState('');
@@ -305,7 +305,6 @@ export default function Home() {
     const payload = {
       selection:
         structured || structuredProp ? 'Structured game pick' : selection,
-      sportsbook,
       market,
       odds: Number(odds),
       stake: Math.round(cents),
@@ -320,8 +319,6 @@ export default function Home() {
           : null,
       playerId: structuredProp ? playerId : null,
       propKey: structuredProp ? propKey : null,
-      gradingRule,
-      gradingNotes,
     };
     const signature = JSON.stringify(payload);
     if (request.current.signature !== signature)
@@ -743,7 +740,7 @@ export default function Home() {
                       <div className="bet-meta">
                         <strong>{b.username}</strong>
                         <span>
-                          W{b.week} · {b.sportsbook}
+                          W{b.week} · FanDuel CT
                         </span>
                         <span className={'status ' + b.status}>{b.status}</span>
                       </div>
@@ -777,10 +774,16 @@ export default function Home() {
                             : 'Commissioner review · custom market'}
                         {b.settlementReason ? ' — ' + b.settlementReason : ''}
                       </p>
-                      {b.gradingNotes && (
-                        <p className="tiny">
-                          Sportsbook rule: {b.gradingNotes}
-                        </p>
+                      {b.review && <p className="notice">{b.review.status === 'open' ? 'Awaiting commissioner review' : 'Review resolved'}: {b.review.reason}{b.review.resolution ? ' — ' + b.review.resolution : ''}</p>}
+                      {b.uid === user?.uid && ['won', 'lost'].includes(b.status) && b.review?.status !== 'open' && !(b.review?.status === 'resolved' && b.review.settledAt === b.settledAt) && (
+                        <Button type="button" variant="outline" disabled={busy || !backendEnabled} onClick={() => { setFlaggingBet(b.id); setFlagReason(''); }}>Flag for commissioner review</Button>
+                      )}
+                      {flaggingBet === b.id && b.review?.status !== 'open' && !(b.review?.status === 'resolved' && b.review.settledAt === b.settledAt) && (
+                        <form onSubmit={(e) => { e.preventDefault(); action(async () => { await call('flagBet', { betId: b.id, reason: flagReason }); setFlaggingBet(''); setFlagReason(''); }, 'Flag sent to the commissioner.'); }}>
+                          <label>Describe the discrepancy<textarea required minLength={3} maxLength={500} value={flagReason} onChange={(e) => setFlagReason(e.target.value)} placeholder="Incorrect result, stat correction, or injury protection…" /></label>
+                          <Button type="submit" disabled={busy || !backendEnabled}>Submit review request</Button>{' '}
+                          <Button type="button" variant="outline" onClick={() => setFlaggingBet('')}>Cancel</Button>
+                        </form>
                       )}
                       {b.reviewReason && (
                         <p className="tiny">{b.reviewReason}</p>
@@ -838,9 +841,9 @@ export default function Home() {
                   <li>
                     <strong>Results are traceable.</strong> Supported player
                     props use explicit final statistics; missing stats and
-                    absent players require commissioner review. Custom
-                    sportsbook conditions require review, even when the entered
-                    odds match the book. Supported feed-linked full-game
+                    absent players require commissioner review. All bets follow FanDuel Connecticut rules.
+                    Injury protection, participation and special cases are verified by the commissioner;
+                    an injury does not automatically refund a bet. Players can flag posted wins or losses. Supported feed-linked full-game
                     moneylines, spreads, and totals can settle from final
                     scores, including overtime. The commissioner can correct
                     results with a reason. Corrections adjust the balance by the
@@ -860,9 +863,16 @@ export default function Home() {
             {commissioner && (
               <TabsContent value="commissioner">
                 <section className="panel">
+                  <h2>Player review requests</h2>
+                  {bets.filter((b) => b.review?.status === 'open').length === 0 && <p className="hint">No player flags awaiting review.</p>}
+                  {bets.filter((b) => b.review?.status === 'open').map((b) => <article className="bet-card" key={b.id}>
+                    <strong>{b.username} · {b.selection}</strong>
+                    <p>{b.review.reason}</p><p className="tiny">Posted result: {b.status} · {date(b.review.requestedAt)}</p>
+                    <Button type="button" variant="outline" onClick={() => { setSelectedBet(b.id); setResult(b.status); setReason(''); }}>Review this result</Button>
+                  </article>)}
                   <h2>Results & corrections</h2>
                   <p className="hint">
-                    Confirm custom bets or correct a result. Every balance
+                    Confirm the existing result to close a flag, or choose a correction. Every balance
                     adjustment is recorded for the league.
                   </p>
                   <form
@@ -1194,46 +1204,7 @@ export default function Home() {
                   />
                 </label>
               )}
-              <label>
-                Sportsbook reference
-                <input
-                  required
-                  maxLength={100}
-                  value={sportsbook}
-                  onChange={(e) => setSportsbook(e.target.value)}
-                  placeholder="e.g. FanDuel"
-                />
-              </label>
-              <label>
-                Grading rule
-                <Picker
-                  value={gradingRule}
-                  onChange={setGradingRule}
-                  label="Sportsbook grading rule"
-                  items={[
-                    {
-                      value: 'full-game',
-                      label: 'Full game, including overtime',
-                    },
-                    {
-                      value: 'custom',
-                      label: 'Custom sportsbook rule · review',
-                    },
-                  ]}
-                />
-              </label>
-              <label>
-                Sportsbook grading notes{' '}
-                {gradingRule === 'custom' ? '(required)' : '(optional)'}
-                <textarea
-                  required={gradingRule === 'custom'}
-                  minLength={gradingRule === 'custom' ? 3 : 0}
-                  maxLength={500}
-                  value={gradingNotes}
-                  onChange={(e) => setGradingNotes(e.target.value)}
-                  placeholder="e.g. Injury protection, regulation only, or special participation requirements. Choose custom for rules that change the result."
-                />
-              </label>
+              <p className="hint">All bets follow <a href={LEAGUE_RULES.url} target="_blank" rel="noreferrer">FanDuel Connecticut rules</a>. Injury protection and special cases require commissioner verification.</p>
               <div className="two">
                 <label>
                   American odds

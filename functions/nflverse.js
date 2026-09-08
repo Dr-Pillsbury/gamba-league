@@ -75,7 +75,9 @@ export function normalizeNflverseStats(rows, game) {
     }
     // Total tackles stays pending until the source's assisted-tackle semantics are verified.
     if (players[r.player_id]) throw Error('Duplicate nflverse player/game statistic row.');
-    players[r.player_id] = { id: r.player_id, name: r.player_display_name, teamId: r.team, values };
+    const participated = ['attempts', 'carries', 'targets', 'sacks_suffered', 'def_tackles_solo', 'def_tackles_with_assist', 'def_tackle_assists', 'def_sacks', 'def_interceptions', 'def_pass_defended', 'kickoff_returns', 'punt_returns']
+      .some((field) => (numericStat(r[field]) ?? 0) > 0);
+    players[r.player_id] = { id: r.player_id, name: r.player_display_name, teamId: r.team, participated, values };
   }
   return players;
 }

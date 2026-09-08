@@ -73,14 +73,14 @@ export function validateBet(data, now, config, balance, opening, staked) {
     data.startsAt >= weekStart(config.startDate, week + 1)
   )
     throw Error('Choose a future event within this football week.');
-  for (const key of ['selection', 'sportsbook'])
+  for (const key of ['selection'])
     if (
       typeof data[key] !== 'string' ||
       !data[key].trim() ||
       data[key].length > 400
     )
       throw Error(
-        'Enter a pick and sportsbook reference (maximum 400 characters).',
+        'Enter a pick (maximum 400 characters).',
       );
   if (
     ![

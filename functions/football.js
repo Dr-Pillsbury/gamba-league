@@ -212,6 +212,7 @@ export function gradeProp(bet, event, stats) {
   if (!Number.isFinite(bet.line) || !['over', 'under'].includes(bet.side))
     return null;
   const value = stats?.players?.[bet.playerId]?.values?.[bet.propKey];
+  if (bet.rules?.provider === 'FanDuel' && !stats?.players?.[bet.playerId]?.participated) return null;
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   const margin = bet.side === 'over' ? value - bet.line : bet.line - value;
   return margin === 0 ? 'push' : margin > 0 ? 'won' : 'lost';

@@ -4,6 +4,7 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { propsForPosition, gradeProp } from './football.js';
 import { runNflImport } from './nfl-sync.js';
+import { createReview, LEAGUE_RULES } from './reviews.js';
 import {
   INITIAL,
   weekAt,
@@ -131,7 +132,7 @@ export const placeBet = clean(async (req) => {
     }
     const bet = {
       selection: String(input.selection ?? '').trim(),
-      sportsbook: String(input.sportsbook ?? '').trim(),
+      rules: LEAGUE_RULES,
       market: input.market,
       odds: input.odds,
       stake: input.stake,
@@ -139,20 +140,10 @@ export const placeBet = clean(async (req) => {
       eventId: event ? input.eventId : null,
       side: input.side ?? null,
       line: input.line ?? null,
-      gradingRule: input.gradingRule ?? 'full-game',
-      gradingNotes: String(input.gradingNotes ?? '').trim(),
+      gradingRule: 'full-game',
       playerId: null,
       propKey: null,
     };
-    if (
-      !['full-game', 'custom'].includes(bet.gradingRule) ||
-      bet.gradingNotes.length > 500
-    )
-      throw Error('Choose a grading rule and limit notes to 500 characters.');
-    if (bet.gradingRule === 'custom' && bet.gradingNotes.length < 3)
-      throw Error(
-        'Describe the sportsbook rule that needs commissioner review.',
-      );
     if (event?.provider === 'nflverse' && event.status !== 'NS')
       throw Error('Only scheduled, not-started games can accept bets.');
     if (event?.provider === 'nflverse' && bet.market === 'Player prop') {
@@ -262,7 +253,7 @@ async function settle(betId, result, actor, reason, automatic = false) {
       throw Error('Wait until the event has started.');
     const m = await tx.get(db.doc('members/' + bet.uid));
     if (!m.exists) throw Error('Player not found.');
-    if (bet.status === result) return;
+    if (bet.status === result && (automatic || bet.review?.status !== 'open')) return;
     const paid = payout(bet.stake, bet.odds, result),
       delta = paid - bet.paid,
       at = Date.now();
@@ -274,6 +265,9 @@ async function settle(betId, result, actor, reason, automatic = false) {
       manualOverride: !automatic,
       settledBy: actor,
       settlementReason: reason,
+      ...(!automatic && bet.review?.status === 'open' ? {
+        review: { ...bet.review, status: 'resolved', resolution: reason, resolvedBy: actor, resolvedAt: at, settledAt: at },
+      } : {}),
     });
     tx.create(db.collection('ledger').doc(), {
       uid: bet.uid,
@@ -315,6 +309,23 @@ export const settleBet = clean(async (req) => {
   if (typeof betId !== 'string' || betId.includes('/'))
     throw Error('Invalid bet.');
   await settle(betId, result, id, reason.trim());
+  return { ok: true };
+});
+export const flagBet = clean(async (req) => {
+  const actor = uid(req);
+  const { betId, reason } = req.data ?? {};
+  if (typeof betId !== 'string' || !betId || betId.includes('/')) throw Error('Invalid bet.');
+  await db.runTransaction(async (tx) => {
+    const ref = db.doc('bets/' + betId), snapshot = await tx.get(ref);
+    if (!snapshot.exists) throw Error('Bet not found.');
+    const bet = snapshot.data(), at = Date.now();
+    const review = createReview(bet, actor, reason, at);
+    tx.update(ref, { review });
+    tx.create(db.collection('audit').doc(), {
+      betId, username: bet.username, selection: bet.selection, from: bet.status,
+      to: 'review requested', actor, reason: review.reason, delta: 0, at,
+    });
+  });
   return { ok: true };
 });
 async function closeWeeks() {
@@ -447,7 +458,7 @@ export const syncFootballScores = onSchedule(
       else
         await doc.ref.update({
           reviewReason:
-            'Final game, but the required statistic is not available. Commissioner review needed.',
+            'Required statistics or participation evidence are missing. Commissioner review under FanDuel Connecticut rules is needed.',
         });
     }
   },
