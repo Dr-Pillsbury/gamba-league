@@ -10,7 +10,7 @@ Google Authentication and the production-mode Firestore database have been enabl
 
 ## Firebase console steps
 
-1. Authentication → Settings → Authorized domains: add `localhost` and `gamba-league.abuzz-moose-7859.chatgpt.site`. Enter hostnames without `https://` or a path.
+1. Authentication → Settings → Authorized domains: add `localhost` and `gamba-league.doc-pillsbury.chatgpt.site`. Enter hostnames without `https://` or a path.
 2. Sign into the app once with Google. Authentication → Users will then show your **User UID**; copy it.
 3. Firestore Database → Data → Start collection: collection ID `config`, document ID `league`. Add these fields with the exact types:
 
@@ -87,3 +87,12 @@ The optional WebMCP `view_league_bets` tool changes the same bet-feed tab and fi
 - [Firestore transactions](https://firebase.google.com/docs/firestore/manage-data/transactions)
 - [Firebase functions setup and deployment](https://firebase.google.com/docs/functions/get-started)
 - [The Odds API scores documentation](https://the-odds-api.com/liveapi/guides/v4/#get-scores)
+
+
+## Setup progress in this session
+
+The season document and Google sign-in domains have now been configured through the project owner's authenticated Firebase CLI account. The commissioner UID is pending the owner's first Google sign-in at the website. After that sign-in, run `node scripts/setup-firebase.cjs hood.travis98@gmail.com` to fill an empty commissioner list without resetting existing league data.
+
+The initial server deployment was blocked by the project's Spark plan. Blaze must be enabled by the owner before deploying Cloud Functions. Use `--account hood.travis98@gmail.com` with the deployment commands if another Firebase CLI login is the global default.
+
+Compatible framework security updates removed the high-severity advisories reported by the starter. Remaining moderate advisories are in upstream Firebase/CLI dependency chains; forced major-version downgrades were not applied. Review those advisories before broader production use.
