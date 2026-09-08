@@ -137,6 +137,7 @@ export default function Home() {
   const [flaggingBet, setFlaggingBet] = useState(''),
     [flagReason, setFlagReason] = useState('');
   const [selectedBet, setSelectedBet] = useState(''),
+    [adjustedOdds, setAdjustedOdds] = useState(''),
     [result, setResult] = useState('won'),
     [reason, setReason] = useState('');
   const request = useRef({ signature: '', id: '' });
@@ -1196,6 +1197,33 @@ export default function Home() {
                       }),
                     )}
                   <h2>Results & corrections</h2>
+                  {bets
+                    .filter(
+                      (b) =>
+                        b.market === 'Parlay' &&
+                        b.status === 'pending' &&
+                        b.reviewReason,
+                    )
+                    .map((b) => (
+                      <article className="bet-card" key={b.id}>
+                        <strong>
+                          {b.username} · {b.selection}
+                        </strong>
+                        <p>{b.reviewReason}</p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedBet(b.id);
+                            setAdjustedOdds('');
+                            setResult('won');
+                            setReason('');
+                          }}
+                        >
+                          Review odds and payout
+                        </Button>
+                      </article>
+                    ))}
                   <p className="hint">
                     Confirm the existing result to close a flag, or choose a
                     correction. Every balance adjustment is recorded for the
@@ -1208,6 +1236,11 @@ export default function Home() {
                         () =>
                           call('settleBet', {
                             betId: selectedBet,
+                            adjustedOdds:
+                              bets.find((b) => b.id === selectedBet)?.market ===
+                                'Parlay' && adjustedOdds !== ''
+                                ? Number(adjustedOdds)
+                                : null,
                             result,
                             reason,
                           }),
@@ -1219,7 +1252,10 @@ export default function Home() {
                       Bet
                       <Picker
                         value={selectedBet}
-                        onChange={setSelectedBet}
+                        onChange={(value) => {
+                          setSelectedBet(value);
+                          setAdjustedOdds('');
+                        }}
                         label="Bet to settle"
                         items={bets.map((b) => ({
                           value: b.id,
@@ -1245,6 +1281,28 @@ export default function Home() {
                         }))}
                       />
                     </label>
+                    {bets.find((b) => b.id === selectedBet)?.market ===
+                      'Parlay' && (
+                      <label>
+                        Revised American odds (optional)
+                        <input
+                          type="number"
+                          step="1"
+                          min="-100000"
+                          max="100000"
+                          value={adjustedOdds}
+                          onChange={(e) => setAdjustedOdds(e.target.value)}
+                          placeholder={String(
+                            bets.find((b) => b.id === selectedBet)?.odds ?? '',
+                          )}
+                        />
+                        <span className="hint">
+                          Verify the remaining legs and sportsbook’s revised
+                          odds. The payout uses these odds; leave blank to keep
+                          the current odds.
+                        </span>
+                      </label>
+                    )}
                     <label>
                       Source or correction reason
                       <textarea

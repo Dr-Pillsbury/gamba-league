@@ -155,6 +155,20 @@ export function gradeParlay(bet, events, stats) {
       ? null
       : statuses.every((s) => s === 'won')
         ? 'won'
-        : 'push';
-  return { result, legs };
+        : null;
+  const needsOddsReview =
+    result !== 'lost' && statuses.some((s) => s === 'push' || s === 'void');
+  return { result, legs, needsOddsReview };
+}
+
+export function parlaySettlementOdds(bet, adjustedOdds) {
+  if (adjustedOdds === undefined || adjustedOdds === null) return bet.odds;
+  if (
+    bet.market !== 'Parlay' ||
+    !Number.isInteger(adjustedOdds) ||
+    Math.abs(adjustedOdds) < 100 ||
+    Math.abs(adjustedOdds) > 100000
+  )
+    throw Error('Enter valid adjusted American odds for the parlay.');
+  return adjustedOdds;
 }

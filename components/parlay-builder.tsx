@@ -278,7 +278,8 @@ export function ParlayBuilder({
       <p className="tiny">
         {legs.length} / {MAX_LEGS} legs. New legs use the game selected above.
         Enter the sportsbook’s combined parlay odds below. If no legs lose and a
-        leg pushes or is void, the parlay stake is refunded.
+        leg pushes or is void, the commissioner reviews the revised odds and
+        payout.
       </p>
     </div>
   );

@@ -11,6 +11,7 @@ import {
   validateParlayLegs,
   gradeParlay,
   MAX_LEGS,
+  parlaySettlementOdds,
 } from './parlay.js';
 import {
   INITIAL,
@@ -394,7 +395,14 @@ export const deleteBet = clean(async (req) => {
   await deletePendingBet(db, uid(req), req.data?.betId);
   return { ok: true };
 });
-async function settle(betId, result, actor, reason, automatic = false) {
+async function settle(
+  betId,
+  result,
+  actor,
+  reason,
+  automatic = false,
+  adjustedOdds = null,
+) {
   if (
     !(automatic && result === null) &&
     !['won', 'lost', 'push', 'void'].includes(result)
@@ -428,7 +436,12 @@ async function settle(betId, result, actor, reason, automatic = false) {
       result = grading.result;
       gradedLegs = grading.legs;
       if (!result) {
-        tx.update(ref, { legs: gradedLegs });
+        tx.update(ref, {
+          legs: gradedLegs,
+          reviewReason: grading.needsOddsReview
+            ? 'A parlay leg pushed or was void. Commissioner must verify revised odds and payout.'
+            : '',
+        });
         return;
       }
     }
@@ -436,9 +449,14 @@ async function settle(betId, result, actor, reason, automatic = false) {
       throw Error('Wait until the event has started.');
     const m = await tx.get(db.doc('members/' + bet.uid));
     if (!m.exists) throw Error('Player not found.');
-    if (bet.status === result && (automatic || bet.review?.status !== 'open'))
+    const settlementOdds = parlaySettlementOdds(bet, adjustedOdds);
+    if (
+      bet.status === result &&
+      settlementOdds === bet.odds &&
+      (automatic || bet.review?.status !== 'open')
+    )
       return;
-    const paid = payout(bet.stake, bet.odds, result),
+    const paid = payout(bet.stake, settlementOdds, result),
       delta = paid - bet.paid,
       at = Date.now();
     tx.update(m.ref, { balance: m.data().balance + delta });
@@ -449,6 +467,11 @@ async function settle(betId, result, actor, reason, automatic = false) {
       manualOverride: !automatic,
       settledBy: actor,
       settlementReason: reason,
+      odds: settlementOdds,
+      ...(settlementOdds !== bet.odds
+        ? { originalOdds: bet.originalOdds ?? bet.odds }
+        : {}),
+      reviewReason: '',
       ...(gradedLegs ? { legs: gradedLegs } : {}),
       ...(!automatic && bet.review?.status === 'open'
         ? {
@@ -480,6 +503,8 @@ async function settle(betId, result, actor, reason, automatic = false) {
       selection: bet.selection,
       from: bet.status,
       to: result,
+      previousOdds: bet.odds,
+      odds: settlementOdds,
       actor,
       reason,
       delta,
@@ -491,7 +516,7 @@ export const settleBet = clean(async (req) => {
   const id = uid(req),
     c = await config();
   admin(id, c);
-  const { betId, result, reason } = req.data ?? {};
+  const { betId, result, reason, adjustedOdds } = req.data ?? {};
   if (
     typeof reason !== 'string' ||
     reason.trim().length < 3 ||
@@ -502,7 +527,7 @@ export const settleBet = clean(async (req) => {
     );
   if (typeof betId !== 'string' || betId.includes('/'))
     throw Error('Invalid bet.');
-  await settle(betId, result, id, reason.trim());
+  await settle(betId, result, id, reason.trim(), false, adjustedOdds);
   return { ok: true };
 });
 export const verifyParlayLeg = clean(async (req) => {

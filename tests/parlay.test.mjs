@@ -4,6 +4,7 @@ import {
   normalizeParlayLeg,
   validateParlayLegs,
   gradeParlay,
+  parlaySettlementOdds,
 } from '../functions/parlay.js';
 import { syncNflverse, SOURCES } from '../functions/nflverse.js';
 import { payout } from '../functions/rules.js';
@@ -64,9 +65,10 @@ test('Other legs require commissioner verification and cannot self-report a win'
   mixed.legs[1].verifiedBy = 'commissioner';
   assert.equal(gradeParlay(mixed, events, {}).result, 'won');
 });
-test('push and void refund only after every remaining leg resolves without a loss', () => {
+test('push and void keep the parlay pending for commissioner odds review', () => {
   const tied = { ...bet, legs: [bet.legs[0], { ...bet.legs[1], line: 45 }] };
-  assert.equal(gradeParlay(tied, events, {}).result, 'push');
+  assert.equal(gradeParlay(tied, events, {}).result, null);
+  assert.equal(gradeParlay(tied, events, {}).needsOddsReview, true);
   assert.equal(gradeParlay(tied, { g2: finished }, {}).result, null);
   assert.equal(
     gradeParlay(
@@ -88,7 +90,7 @@ test('push and void refund only after every remaining leg resolves without a los
       events,
       {},
     ).result,
-    'push',
+    null,
   );
 });
 test('anytime touchdown parlay legs accept rushing or receiving and retain participation checks', () => {
@@ -187,4 +189,15 @@ test('nflverse imports box scores for player props nested inside pending parlays
   });
   assert.ok(calls.includes(SOURCES.stats(2026)));
   assert.ok(writes.has('gameStats/nv_2026_01_BUF_LA'));
+});
+
+test('commissioner revised odds determine payout and reject invalid changes', () => {
+  const original = { market: 'Parlay', odds: 260 };
+  assert.equal(parlaySettlementOdds(original, null), 260);
+  assert.equal(payout(1000, parlaySettlementOdds(original, -110), 'won'), 1909);
+  for (const odds of [0, 99, 100001, NaN, '200'])
+    assert.throws(() => parlaySettlementOdds(original, odds));
+  assert.throws(() =>
+    parlaySettlementOdds({ market: 'Moneyline', odds: 100 }, 200),
+  );
 });
