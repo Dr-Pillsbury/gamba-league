@@ -21,6 +21,8 @@ import {
   INITIAL,
   weekAt,
   weekStart,
+  weekEnd,
+  bettingOpen,
   payout,
 } from '@/functions/rules.js';
 import { Button } from '@/components/ui/button';
@@ -203,10 +205,10 @@ export default function Home() {
     );
     return () => stops.forEach((s) => s());
   }, [me?.id, commissioner]);
-  const start = config?.startDate ?? '2026-09-09',
+  const start = config?.startDate ?? '2026-09-08',
     actualWeek = now ? weekAt(now, start) : 0,
     week = Math.max(1, Math.min(18, actualWeek)),
-    inSeason = !!config && actualWeek >= 1 && actualWeek <= 18;
+    inSeason = !!config && bettingOpen(now, start);
   const myBets = bets.filter((b) => b.uid === user?.uid),
     staked = myBets
       .filter((b) => b.week === week && b.status !== 'void')
@@ -244,7 +246,7 @@ export default function Home() {
       (e) =>
         e.provider === 'nflverse' &&
         Date.parse(e.commence_time) >= weekStart(start, week) &&
-        Date.parse(e.commence_time) < weekStart(start, week + 1),
+        Date.parse(e.commence_time) < weekEnd(start, week),
     )
     .sort((a, b) => Date.parse(a.commence_time) - Date.parse(b.commence_time));
   const rows =
@@ -417,8 +419,7 @@ export default function Home() {
               {actualWeek < 1 ? 'Season opens' : 'Week ' + week + ' deadline'}
               <strong>
                 {date(
-                  weekStart(start, actualWeek < 1 ? 1 : week + 1) -
-                    (actualWeek < 1 ? 0 : 60000),
+                  actualWeek < 1 ? weekStart(start, 1) : weekEnd(start, week) - 60000,
                 )}
               </strong>
             </span>
@@ -612,8 +613,8 @@ export default function Home() {
                 </div>
                 <p className="hint">
                   {viewWeek === 'live'
-                    ? 'Ranked by current account balance. Weekly finishes are saved after Tuesday closes.'
-                    : 'Balance at Wednesday midnight Eastern. Later corrections appear in the live standings.'}
+                    ? 'Ranked by current account balance. Weekly finishes are saved after Monday closes.'
+                    : 'Balance at Tuesday midnight Eastern. Later corrections appear in the live standings.'}
                 </p>
                 {!rows.length ? (
                   <div className="empty">
@@ -811,7 +812,7 @@ export default function Home() {
                   </li>
                   <li>
                     <strong>Wager at least $10 each week.</strong> A week starts
-                    Wednesday at midnight and ends Tuesday at 11:59 p.m.
+                    Tuesday at 10 a.m. and ends Monday at 11:59 p.m.
                     Eastern. Daylight saving time is respected.
                   </li>
                   <li>
@@ -1032,7 +1033,7 @@ export default function Home() {
                           (e.provider !== 'nflverse' || e.status === 'NS') &&
                           Date.parse(e.commence_time) > now &&
                           Date.parse(e.commence_time) <
-                            weekStart(start, week + 1),
+                            weekEnd(start, week),
                       )
                       .map((e) => ({
                         value: e.id,
@@ -1286,7 +1287,7 @@ export default function Home() {
       </div>
       <footer>
         PLAY MONEY. REAL BRAGGING RIGHTS.
-        <span>Wednesday → Tuesday · Eastern time · Data: <a href="https://github.com/nflverse/nflverse-data" target="_blank" rel="noreferrer">nflverse</a></span>
+        <span>Tuesday 10 a.m. → Monday 11:59 p.m. · Eastern time · Data: <a href="https://github.com/nflverse/nflverse-data" target="_blank" rel="noreferrer">nflverse</a></span>
       </footer>
     </main>
   );

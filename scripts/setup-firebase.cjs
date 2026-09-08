@@ -54,7 +54,7 @@ async function main() {
       '/v1/projects/' + project + '/databases/(default)/documents/config',
       {
         fields: {
-          startDate: { stringValue: '2026-09-09' },
+          startDate: { stringValue: '2026-09-08' },
           commissionerUids: {
             arrayValue: { values: uid ? [{ stringValue: uid }] : [] },
           },
@@ -63,7 +63,7 @@ async function main() {
       },
       { queryParams: { documentId: 'league' } },
     );
-    console.log('Season configured: September 9, 2026.');
+    console.log('Season configured: September 8, 2026 at 10 a.m. Eastern.');
   } else if (
     uid &&
     !(existing.fields?.commissionerUids?.arrayValue?.values ?? []).length

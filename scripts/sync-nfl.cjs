@@ -99,7 +99,7 @@ async function main() {
   });
   console.log(JSON.stringify(result));
   console.log(
-    'Schedule and available rosters imported. Cloud Functions remain undeployed.',
+    'Schedule and available rosters imported. This local import does not change activation settings.',
   );
 }
 main().catch((e) => {

@@ -9,6 +9,7 @@ import {
   INITIAL,
   weekAt,
   weekStart,
+  weekEnd,
   validateBet,
   payout,
   grade,
@@ -31,11 +32,11 @@ async function config() {
   const c = s.data();
   if (
     !/^\d{4}-\d{2}-\d{2}$/.test(c.startDate) ||
-    new Date(c.startDate + 'T00:00:00Z').getUTCDay() !== 3
+    new Date(c.startDate + 'T00:00:00Z').getUTCDay() !== 2
   )
     throw new HttpsError(
       'failed-precondition',
-      'Season start must be a Wednesday.',
+      'Season start must be a Tuesday.',
     );
   return c;
 }
@@ -342,7 +343,7 @@ async function closeWeeks() {
         tx.get(db.collection('ledger')),
         tx.get(db.collection('bets')),
       ]);
-      const cutoff = weekStart(c.startDate, week + 1);
+      const cutoff = weekEnd(c.startDate, week);
       const rows = ms.docs
         .filter((m) => m.data().joinedAt < cutoff)
         .map((m) => {
@@ -380,7 +381,7 @@ async function closeWeeks() {
 }
 export const closeLeagueWeeks = onSchedule(
   {
-    schedule: '5 0 * * 3',
+    schedule: '15 10 * * 2',
     timeZone: 'America/New_York',
     region: 'us-central1',
   },

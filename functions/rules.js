@@ -10,13 +10,14 @@ export function easternDate(ms) {
   }).format(new Date(ms));
 }
 export function weekAt(ms, start) {
-  return (
+  const candidate = (
     Math.floor(
       (Date.parse(easternDate(ms) + 'T00:00:00Z') -
         Date.parse(start + 'T00:00:00Z')) /
         604800000,
     ) + 1
   );
+  return ms < weekStart(start, candidate) ? candidate - 1 : candidate;
 }
 export function weekStart(start, week) {
   const day = new Date(
@@ -33,7 +34,15 @@ export function weekStart(start, week) {
     }).format(new Date(ms)) === '01'
   )
     ms -= 3600000;
-  return ms;
+  return ms + 10 * 3600000;
+}
+// Tuesday midnight is the exclusive end of Monday's betting window.
+export function weekEnd(start, week) {
+  return weekStart(start, week + 1) - 10 * 3600000;
+}
+export function bettingOpen(ms, start) {
+  const week = weekAt(ms, start);
+  return week >= 1 && week <= WEEKS && ms >= weekStart(start, week) && ms < weekEnd(start, week);
 }
 export function payout(stake, odds, status) {
   if (status === 'push' || status === 'void') return stake;
@@ -53,6 +62,7 @@ export function validateBet(data, now, config, balance, opening, staked) {
   const week = weekAt(now, config.startDate);
   if (week < 1 || week > 18)
     throw Error('Betting is outside the 18-week season.');
+  if (!bettingOpen(now, config.startDate)) throw Error('Betting reopens Tuesday at 10 a.m. Eastern.');
   if (!Number.isSafeInteger(data.stake) || data.stake < 1)
     throw Error('Enter a positive stake with at most two decimal places.');
   if (
@@ -70,7 +80,7 @@ export function validateBet(data, now, config, balance, opening, staked) {
   if (
     !Number.isFinite(data.startsAt) ||
     data.startsAt <= now ||
-    data.startsAt >= weekStart(config.startDate, week + 1)
+    data.startsAt >= weekEnd(config.startDate, week)
   )
     throw Error('Choose a future event within this football week.');
   for (const key of ['selection'])

@@ -4,9 +4,9 @@ A single-season football picks league. Google authentication and Cloud Firestore
 
 ## Current setup
 
-Firebase web app: `gamba-league`. Season starts **Wednesday, September 9, 2026**, with 18 weekly periods. The web configuration is public identification, not an administrative credential. Analytics is not enabled.
+Firebase web app: `gamba-league`. Season starts **Tuesday, September 8, 2026 at 10 a.m. Eastern**, with 18 weekly periods. The web configuration is public identification, not an administrative credential. Analytics is not enabled.
 
-Google Authentication and Firestore are enabled. hood.travis98@gmail.com has verified commissioner access. Sign-in domains and the season document are configured. Cloud Functions remain **undeployed**, as requested. The frontend disables account mutations and betting until config/league.backendEnabled is explicitly enabled after backend validation.
+Google Authentication and Firestore are enabled. hood.travis98@gmail.com has verified commissioner access. Sign-in domains and the season document are configured. All seven Cloud Functions deployed successfully on September 8, 2026. The owner has authorized betting, reviews and automatic settlement. The frontend disables account mutations and betting until config/league.backendEnabled is explicitly enabled after backend validation.
 
 ## nflverse data
 
@@ -22,7 +22,7 @@ The owner can refresh schedules and rosters without deploying Cloud Functions:
 
 ## Backend activation (deferred)
 
-Cloud Functions remain undeployed on the owner's request. The frontend shows imported data, but betting and scheduled settlement remain disabled. Review Firebase costs before choosing Blaze. After approval, install root/functions dependencies, deploy the backend with the owner account, and test callable functions. No sports API secret is needed. Enable config/league.dataSyncEnabled, autoSettlementEnabled and backendEnabled only after verification.
+The project is now on Blaze. All seven functions are ACTIVE, callable endpoints enforce authentication, and both Eastern-time schedules were verified. Activation is performed by scripts/activate-backend.cjs after deployed resource checks. No sports API secret is needed. Enable config/league.dataSyncEnabled, autoSettlementEnabled and backendEnabled only after verification.
 
 ## League accounting
 
@@ -33,7 +33,7 @@ Cloud Functions remain undeployed on the owner's request. The frontend shows imp
 - The weekly minimum may be split into smaller bets. Pushes count; voids do not. A void restores weekly stake capacity within the current cash limit. Missed minimums are flagged without an automatic penalty.
 - Bet submissions use server time, are immutable, and require an upcoming start inside the current week. Custom events rely on the supplied start time and commissioner review. For a parlay, use the earliest leg start.
 - Transactions serialize concurrent bets against the player's wallet. A client request ID makes retries idempotent. Settlement is transactional and repeat-safe.
-- Wednesday snapshots reconstruct balances and weekly compliance at the cutoff from the append-only ledger. Late results and corrections affect live standings, not frozen historical finishes. No automatic winner is declared while results remain pending; the top final live balance is the winner once all Week 18 bets are settled.
+- Tuesday 10:15 a.m. snapshots reconstruct balances and weekly compliance at the cutoff from the append-only ledger. Late results and corrections affect live standings, not frozen historical finishes. No automatic winner is declared while results remain pending; the top final live balance is the winner once all Week 18 bets are settled.
 - Usernames are case-insensitively unique, 3–20 letters/numbers/underscores. Joining after Week 1 is disabled. This is one friends league and one season; a season reset or multiple leagues is not implemented.
 
 ## Development and validation
@@ -69,6 +69,10 @@ Framework updates removed the starter's high-severity advisories. Remaining mode
 
 New bets pin the July 30, 2026 Connecticut house-rules reference. Ordinary full-game pushes refund the stake. Player stats must also show participation evidence before automatic grading; absent evidence stays pending instead of being treated as a zero-stat loss/win or automatic void. Injury protection eligibility, promotional credits, suspended games and parlay recalculation are not automatically inferred from nflverse. The commissioner verifies those cases against FanDuel's applicable terms; no blanket injury-refund or paid Bet Protect+ enrollment is assumed.
 
-Players can flag their own posted wins/losses with a 3–500 character reason. The flag is transactional, prevents duplicate requests for an already reviewed result, writes audit history and never changes balances. The commissioner queue permits confirming the same result or correcting it; either resolves the request with a reason and records the payout difference. Callable flagBet and settlement changes remain undeployed until backend activation is authorized.
+Players can flag their own posted wins/losses with a 3–500 character reason. The flag is transactional, prevents duplicate requests for an already reviewed result, writes audit history and never changes balances. The commissioner queue permits confirming the same result or correcting it; either resolves the request with a reason and records the payout difference. The flagBet callable and settlement changes are deployed; activation is authorized.
 
 Reference: https://d38ayms4az88sz.cloudfront.net/SB/CT/2026-07-30T12-42-48.html
+
+The owner can run `node scripts/activate-backend.cjs --verify-only` for read-only checks. Without that flag, the script enables betting, data imports and automatic settlement and requests an initial refresh; run only after explicit activation approval.
+
+Weekly betting opens Tuesday at 10 a.m. Eastern and closes Monday at 11:59 p.m. Tuesday midnight–10 a.m. is closed, enforced by both UI and callable validation. Daily nflverse settlement runs at 10 a.m.; the new week opens at that time without waiting for missing results. Snapshots run Tuesday at 10:15 a.m. and preserve the Monday-night balance cutoff; subsequent settlements affect live balances. Eastern DST is respected.

@@ -5,10 +5,12 @@ import {
   payout,
   weekAt,
   weekStart,
+  weekEnd,
+  bettingOpen,
   validateBet,
   grade,
 } from '../functions/rules.js';
-const c = { startDate: '2026-09-09' },
+const c = { startDate: '2026-09-08' },
   now = Date.parse('2026-09-10T15:00:00Z');
 const bet = {
   stake: 1000,
@@ -47,18 +49,24 @@ test('American odds round payout to cents with stake included', () => {
   assert.equal(payout(1000, -110, 'void'), 1000);
   assert.equal(payout(1000, -110, 'lost'), 0);
 });
-test('Tuesday 11:59 stays in previous week and Wednesday midnight advances', () => {
-  assert.equal(weekAt(Date.parse('2026-09-16T03:59:59Z'), c.startDate), 1);
-  assert.equal(weekAt(Date.parse('2026-09-16T04:00:00Z'), c.startDate), 2);
+test('Monday closes at midnight; Tuesday 10am opens the next week', () => {
+  assert.equal(bettingOpen(Date.parse('2026-09-15T03:59:59Z'), c.startDate), true);
+  assert.equal(bettingOpen(Date.parse('2026-09-15T04:00:00Z'), c.startDate), false);
+  assert.equal(weekAt(Date.parse('2026-09-15T13:59:59Z'), c.startDate), 1);
+  assert.equal(bettingOpen(Date.parse('2026-09-15T13:59:59Z'), c.startDate), false);
+  assert.equal(weekAt(Date.parse('2026-09-15T14:00:00Z'), c.startDate), 2);
+  assert.equal(bettingOpen(Date.parse('2026-09-15T14:00:00Z'), c.startDate), true);
+  assert.equal(weekEnd(c.startDate,1),Date.parse('2026-09-15T04:00:00Z'));
+  assert.throws(() => validateBet({...bet,startsAt:Date.parse('2026-09-15T15:00:00Z')},Date.parse('2026-09-15T13:00:00Z'),c,18000,18000,0));
 });
 test('Eastern boundary respects the November daylight-saving change', () => {
   assert.equal(
     new Date(weekStart(c.startDate, 8)).toISOString(),
-    '2026-10-28T04:00:00.000Z',
+    '2026-10-27T14:00:00.000Z',
   );
   assert.equal(
     new Date(weekStart(c.startDate, 9)).toISOString(),
-    '2026-11-04T05:00:00.000Z',
+    '2026-11-03T15:00:00.000Z',
   );
 });
 test('invalid stakes, odds, past games, next-week games, and closed seasons rejected', () => {
