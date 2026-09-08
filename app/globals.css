@@ -417,11 +417,14 @@ button {
   min-width: 0;
 }
 .league-tabs {
-  height: 48px !important;
+  height: auto !important;
+  min-height: 48px;
   margin-bottom: 18px;
   gap: 20px !important;
   max-width: 100%;
-  overflow: auto;
+  overflow: visible;
+  flex-wrap: wrap;
+  row-gap: 4px !important;
 }
 .league-tabs button {
   font-size: 15px;

@@ -8,7 +8,7 @@ async function main() {
   await requireAuth(options);
   const functions = new Client({ urlPrefix: 'https://cloudfunctions.googleapis.com', auth: true });
   const base = `/v2/projects/${project}/locations/us-central1/functions`;
-  const callable = ['joinLeague', 'placeBet', 'settleBet', 'refreshStandings', 'flagBet', 'reviewJoinRequest'];
+  const callable = ['joinLeague', 'placeBet', 'deleteBet', 'settleBet', 'refreshStandings', 'flagBet', 'reviewJoinRequest'];
   for (const name of [...callable, 'closeLeagueWeeks', 'syncFootballScores']) {
     const f = (await functions.get(base + '/' + name)).body;
     if (f.state !== 'ACTIVE') throw Error(name + ' is not ACTIVE. League remains paused.');
@@ -35,9 +35,12 @@ async function main() {
     return;
   }
   const names = ['backendEnabled', 'dataSyncEnabled', 'autoSettlementEnabled'];
-  await db.patch(path, { fields: { ...Object.fromEntries(names.map(n => [n, { booleanValue: true }])), startDate: {stringValue:'2026-09-08'} } }, {
-    queryParams: { 'updateMask.fieldPaths': [...names, 'startDate'], 'currentDocument.updateTime': before.updateTime },
-  });
+  for (const field of [...names, 'startDate']) {
+    const current = (await db.get(path)).body;
+    await db.patch(path, { fields: { [field]: field === 'startDate' ? { stringValue: '2026-09-08' } : { booleanValue: true } } }, {
+      queryParams: { 'updateMask.fieldPaths': field, 'currentDocument.updateTime': current.updateTime },
+    });
+  }
   const after = (await db.get(path)).body;
   if (!names.every(n => after.fields?.[n]?.booleanValue === true)) throw Error('Activation verification failed.');
   console.log('Verified: betting, data imports and automatic settlement enabled.');

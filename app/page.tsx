@@ -513,7 +513,7 @@ export default function Home() {
         <section>
           <span>{me ? 'Account balance' : 'Starting balance'}</span>
           <strong>{money(balance)}</strong>
-          <small>Virtual dollars · pending stakes deducted</small>
+          <small>Bankroll · pending stakes deducted</small>
         </section>
         <section>
           <span>
@@ -789,6 +789,13 @@ export default function Home() {
                         {b.settlementReason ? ' — ' + b.settlementReason : ''}
                       </p>
                       {b.review && <p className="notice">{b.review.status === 'open' ? 'Awaiting commissioner review' : 'Review resolved'}: {b.review.reason}{b.review.resolution ? ' — ' + b.review.resolution : ''}</p>}
+                      {b.uid === user?.uid && b.status === 'pending' && (
+                        <Button type="button" variant="outline" disabled={busy || !backendEnabled} onClick={() => {
+                          if (window.confirm(`Delete this bet and return your ${money(b.stake)} stake? This bet will no longer count toward your weekly minimum.`)) {
+                            action(() => call('deleteBet', { betId: b.id }), 'Bet deleted. Your stake has been returned.');
+                          }
+                        }}>Delete bet</Button>
+                      )}
                       {b.uid === user?.uid && ['won', 'lost'].includes(b.status) && b.review?.status !== 'open' && !(b.review?.status === 'resolved' && b.review.settledAt === b.settledAt) && (
                         <Button type="button" variant="outline" disabled={busy || !backendEnabled} onClick={() => { setFlaggingBet(b.id); setFlagReason(''); }}>Flag for commissioner review</Button>
                       )}
@@ -1109,7 +1116,13 @@ export default function Home() {
                     Player prop
                     <Picker
                       value={propKey}
-                      onChange={setPropKey}
+                      onChange={(value) => {
+                        setPropKey(value);
+                        if (value === 'anytime_td') {
+                          setSide('over');
+                          setLine('0.5');
+                        }
+                      }}
                       label="Player statistic"
                       items={[
                         { value: '', label: 'Choose a statistic' },
@@ -1120,7 +1133,9 @@ export default function Home() {
                       ]}
                     />
                   </label>
-                  <div className="two">
+                  {propKey === 'anytime_td' ? (
+                    <p className="hint">Player must score at least one rushing or receiving touchdown. Passing touchdowns do not count.</p>
+                  ) : <div className="two">
                     <label>
                       Direction
                       <Picker
@@ -1146,12 +1161,11 @@ export default function Home() {
                         placeholder="e.g. 64.5"
                       />
                     </label>
-                  </div>
+                  </div>}
                   <p className="tiny">
                     Prop choices are based on position, not a live sportsbook
-                    listing. Enter your sportsbook’s line and odds. Touchdowns
-                    are separated into passing, rushing, and receiving; special
-                    scorer bets use a custom pick.
+                    listing. Enter your sportsbook’s odds and, when applicable,
+                    line. Anytime touchdown counts rushing or receiving touchdowns.
                   </p>
                 </>
               ) : structured ? (

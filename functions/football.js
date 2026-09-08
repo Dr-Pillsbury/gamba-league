@@ -1,6 +1,13 @@
 // Shared, pure football normalization and grading. Missing data is never zero.
 export const PROP_MARKETS = [
   {
+    key: 'anytime_td',
+    label: 'Anytime touchdown',
+    group: 'scoring',
+    fields: [],
+    positions: ['QB', 'RB', 'FB', 'WR', 'TE'],
+  },
+  {
     key: 'passing_yards',
     label: 'Passing yards',
     group: 'passing',
@@ -213,6 +220,13 @@ export function gradeProp(bet, event, stats) {
     return null;
   const value = stats?.players?.[bet.playerId]?.values?.[bet.propKey];
   if (bet.rules?.provider === 'FanDuel' && !stats?.players?.[bet.playerId]?.participated) return null;
+  if (bet.propKey === 'anytime_td') {
+    if (bet.side !== 'over' || bet.line !== 0.5) return null;
+    const values = stats?.players?.[bet.playerId]?.values;
+    const touchdowns = [values?.rushing_tds, values?.receiving_tds];
+    if (touchdowns.some((n) => Number.isFinite(n) && n >= 1)) return 'won';
+    return touchdowns.every((n) => n === 0) ? 'lost' : null;
+  }
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   const margin = bet.side === 'over' ? value - bet.line : bet.line - value;
   return margin === 0 ? 'push' : margin > 0 ? 'won' : 'lost';

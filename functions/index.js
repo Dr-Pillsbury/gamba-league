@@ -5,6 +5,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { propsForPosition, gradeProp } from './football.js';
 import { runNflImport } from './nfl-sync.js';
 import { createReview, LEAGUE_RULES } from './reviews.js';
+import { deletePendingBet } from './delete-bet.js';
 import {
   INITIAL,
   weekAt,
@@ -123,13 +124,14 @@ export const placeBet = clean(async (req) => {
   const ref = db.doc('bets/' + id + '_' + input.requestId);
   await db.runTransaction(async (tx) => {
     const now = Date.now();
-    const [existing, m, ls, bs] = await Promise.all([
+    const [existing, m, ls, bs, removed] = await Promise.all([
       tx.get(ref),
       tx.get(db.doc('members/' + id)),
       tx.get(db.collection('ledger').where('uid', '==', id)),
       tx.get(db.collection('bets').where('uid', '==', id)),
+      tx.get(db.doc('deletedBets/' + ref.id)),
     ]);
-    if (existing.exists) return;
+    if (existing.exists || removed.exists) return;
     if (!m.exists) throw Error('Join the league first.');
     const week = weekAt(now, c.startDate),
       start = weekStart(c.startDate, week);
@@ -205,6 +207,10 @@ export const placeBet = clean(async (req) => {
         );
       bet.playerId = String(input.playerId);
       bet.propKey = prop.key;
+      if (prop.key === 'anytime_td') {
+        bet.side = 'over';
+        bet.line = 0.5;
+      }
       bet.selection =
         player.name +
         ' ' +
@@ -213,6 +219,8 @@ export const placeBet = clean(async (req) => {
         bet.line +
         ' ' +
         prop.label.toLowerCase();
+      if (prop.key === 'anytime_td')
+        bet.selection = player.name + ' anytime touchdown';
     }
     if (event && ['Moneyline', 'Spread', 'Total'].includes(bet.market)) {
       const sides =
@@ -269,13 +277,20 @@ export const placeBet = clean(async (req) => {
   });
   return { ok: true };
 });
+export const deleteBet = clean(async (req) => {
+  await deletePendingBet(db, uid(req), req.data?.betId);
+  return { ok: true };
+});
 async function settle(betId, result, actor, reason, automatic = false) {
   if (!['won', 'lost', 'push', 'void'].includes(result))
     throw Error('Choose win, loss, push, or void.');
   await db.runTransaction(async (tx) => {
     const ref = db.doc('bets/' + betId),
       b = await tx.get(ref);
-    if (!b.exists) throw Error('Bet not found.');
+    if (!b.exists) {
+      if (automatic) return;
+      throw Error('Bet not found.');
+    }
     const bet = b.data();
     if (automatic && (bet.status !== 'pending' || bet.manualOverride)) return;
     if (Date.now() < bet.startsAt && result !== 'void')
@@ -485,9 +500,13 @@ export const syncFootballScores = onSchedule(
           true,
         );
       else
-        await doc.ref.update({
-          reviewReason:
-            'Required statistics or participation evidence are missing. Commissioner review under FanDuel Connecticut rules is needed.',
+        await db.runTransaction(async (tx) => {
+          const current = await tx.get(doc.ref);
+          if (!current.exists || current.data().status !== 'pending') return;
+          tx.update(doc.ref, {
+            reviewReason:
+              'Required statistics or participation evidence are missing. Commissioner review under FanDuel Connecticut rules is needed.',
+          });
         });
     }
   },

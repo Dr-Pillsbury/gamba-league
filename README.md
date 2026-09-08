@@ -22,7 +22,11 @@ The owner can refresh schedules and rosters without deploying Cloud Functions:
 
 ## Backend activation (deferred)
 
-The project is now on Blaze. All seven functions are ACTIVE, callable endpoints enforce authentication, and both Eastern-time schedules were verified. Activation is performed by scripts/activate-backend.cjs after deployed resource checks. No sports API secret is needed. Enable config/league.dataSyncEnabled, autoSettlementEnabled and backendEnabled only after verification.
+The project is now on Blaze. All seven functions are ACTIVE, callable endpoints enforce authentication, and both Eastern-time schedules were verified. The public site is Firebase Hosting at https://gamba-league.web.app, with Firebase Hosting rewriting dynamic requests to the Cloud Run service `gamba-league-web` in `us-central1`. No sports API secret is needed. The Cloud Run adapter serves Vinext HTML and compiled `/_next/static/` assets.
+
+## Deployment and season activation
+
+From PowerShell in the project directory, deploy the web service with `gcloud run deploy gamba-league-web --source . --region us-central1 --project gamba-league --allow-unauthenticated`, then build and deploy Hosting with `& "C:/Program Files/nodejs/npm.cmd" run build` and `node node_modules/firebase-tools/lib/bin/firebase.js deploy --only hosting --project gamba-league --account hood.travis98@gmail.com`. Verify backend resources with `node scripts/activate-backend.cjs --verify-only`; the commissioner activates betting, nflverse imports, and automatic settlement with `node scripts/activate-backend.cjs`.
 
 ## League accounting
 
@@ -31,7 +35,7 @@ The project is now on Blaze. All seven functions are ACTIVE, callable endpoints 
 - Reserve = 1000 × remaining weeks. Available amount = max(0, current balance − reserve). Week 1 starts at $10; settled returns immediately become spendable within the same week while the future-week reserve stays protected.
 - Pending potential payouts cannot be spent. Commissioner corrections may create a reserve shortfall; new betting freezes until funds recover.
 - The weekly minimum may be split into smaller bets. Pushes count; voids do not. A void restores weekly stake capacity within the current cash limit. Missed minimums are flagged without an automatic penalty.
-- Bet submissions use server time, are immutable, and require an upcoming start inside the current week. Custom events rely on the supplied start time and commissioner review. For a parlay, use the earliest leg start.
+- Bet submissions use server time and require an upcoming start inside the current week. Players can delete their own pending bets from the bet feed; deletion refunds the stake and removes it from weekly minimum progress. Settled bets cannot be deleted. A transaction serializes deletion against settlement and refunds once; private deletion records prevent submission retries from recreating removed bets, while ledger and audit history remain intact. Custom events rely on the supplied start time and commissioner review. For a parlay, use the earliest leg start.
 - Transactions serialize concurrent bets against the player's wallet. A client request ID makes retries idempotent. Settlement is transactional and repeat-safe.
 - Tuesday 10:15 a.m. snapshots reconstruct balances and weekly compliance at the cutoff from the append-only ledger. Late results and corrections affect live standings, not frozen historical finishes. No automatic winner is declared while results remain pending; the top final live balance is the winner once all Week 18 bets are settled.
 - Usernames are case-insensitively unique, 3–20 letters/numbers/underscores. Joining through Week 1 is automatic; later entry requires commissioner approval. This is one friends league and one season; a season reset or multiple leagues is not implemented.
