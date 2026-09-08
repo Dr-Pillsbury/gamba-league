@@ -7,6 +7,12 @@ import { runNflImport } from './nfl-sync.js';
 import { createReview, LEAGUE_RULES } from './reviews.js';
 import { deletePendingBet } from './delete-bet.js';
 import {
+  normalizeParlayLeg,
+  validateParlayLegs,
+  gradeParlay,
+  MAX_LEGS,
+} from './parlay.js';
+import {
   INITIAL,
   weekAt,
   weekStart,
@@ -66,7 +72,8 @@ export const joinLeague = clean(async (req) => {
     name = String(req.data?.username ?? '').trim();
   if (!/^[A-Za-z0-9_]{3,20}$/.test(name))
     throw Error('Use 3–20 letters, numbers, or underscores.');
-  const at = Date.now(), late = at >= weekEnd(c.startDate, 1);
+  const at = Date.now(),
+    late = at >= weekEnd(c.startDate, 1);
   if (!lateJoinBankroll(at, c.startDate)) throw Error('This season has ended.');
   await db.runTransaction(async (tx) => {
     const member = db.doc('members/' + id),
@@ -75,9 +82,15 @@ export const joinLeague = clean(async (req) => {
     if (m.exists) return;
     if (h.exists) throw Error('That username is taken.');
     if (late) {
-      const request = db.doc('joinRequests/' + id), previous = await tx.get(request);
+      const request = db.doc('joinRequests/' + id),
+        previous = await tx.get(request);
       if (previous.data()?.status === 'pending') return;
-      tx.set(request, { uid: id, username: name, status: 'pending', requestedAt: at });
+      tx.set(request, {
+        uid: id,
+        username: name,
+        status: 'pending',
+        requestedAt: at,
+      });
       return;
     }
     tx.create(handle, { uid: id });
@@ -90,27 +103,79 @@ export const joinLeague = clean(async (req) => {
   return { ok: true };
 });
 export const reviewJoinRequest = clean(async (req) => {
-  const actor = uid(req), c = await config(); admin(actor, c);
+  const actor = uid(req),
+    c = await config();
+  admin(actor, c);
   const { requestId, approve, bankroll } = req.data ?? {};
-  if (typeof requestId !== 'string' || !requestId || requestId.includes('/') || typeof approve !== 'boolean') throw Error('Invalid entry request.');
-  const at = Date.now(), allocation = bankroll ?? lateJoinBankroll(at, c.startDate);
-  if (approve && (!Number.isSafeInteger(allocation) || allocation < 0 || allocation > 100000000)) throw Error('Enter a bankroll from $0 to $1,000,000 in whole cents.');
-  await db.runTransaction(async tx => {
-    const ref = db.doc('joinRequests/' + requestId), r = await tx.get(ref);
-    if (!r.exists || r.data().status !== 'pending') throw Error('Request is no longer pending.');
-    const data = r.data(), member = db.doc('members/' + requestId), handle = db.doc('usernames/' + data.username.toLowerCase());
-    const [m,h] = await Promise.all([tx.get(member),tx.get(handle)]);
+  if (
+    typeof requestId !== 'string' ||
+    !requestId ||
+    requestId.includes('/') ||
+    typeof approve !== 'boolean'
+  )
+    throw Error('Invalid entry request.');
+  const at = Date.now(),
+    allocation = bankroll ?? lateJoinBankroll(at, c.startDate);
+  if (
+    approve &&
+    (!Number.isSafeInteger(allocation) ||
+      allocation < 0 ||
+      allocation > 100000000)
+  )
+    throw Error('Enter a bankroll from $0 to $1,000,000 in whole cents.');
+  await db.runTransaction(async (tx) => {
+    const ref = db.doc('joinRequests/' + requestId),
+      r = await tx.get(ref);
+    if (!r.exists || r.data().status !== 'pending')
+      throw Error('Request is no longer pending.');
+    const data = r.data(),
+      member = db.doc('members/' + requestId),
+      handle = db.doc('usernames/' + data.username.toLowerCase());
+    const [m, h] = await Promise.all([tx.get(member), tx.get(handle)]);
     if (approve) {
-      if (!lateJoinBankroll(at,c.startDate)) throw Error('This season has ended.');
-      if (m.exists || h.exists) throw Error('Player already joined or username is taken. Ask the player to request a different name.');
-      tx.create(handle,{uid:requestId});
-      tx.create(member,{username:data.username,balance:allocation,joinedAt:at,startingBankroll:allocation,approvedBy:actor});
-      tx.create(db.collection('ledger').doc(),{uid:requestId,delta:allocation-INITIAL,at,kind:'late entry allocation',week:Math.max(1,weekAt(at,c.startDate)),stakeDelta:0});
+      if (!lateJoinBankroll(at, c.startDate))
+        throw Error('This season has ended.');
+      if (m.exists || h.exists)
+        throw Error(
+          'Player already joined or username is taken. Ask the player to request a different name.',
+        );
+      tx.create(handle, { uid: requestId });
+      tx.create(member, {
+        username: data.username,
+        balance: allocation,
+        joinedAt: at,
+        startingBankroll: allocation,
+        approvedBy: actor,
+      });
+      tx.create(db.collection('ledger').doc(), {
+        uid: requestId,
+        delta: allocation - INITIAL,
+        at,
+        kind: 'late entry allocation',
+        week: Math.max(1, weekAt(at, c.startDate)),
+        stakeDelta: 0,
+      });
     }
-    tx.update(ref,{status:approve?'approved':'declined',resolvedAt:at,resolvedBy:actor,...(approve?{bankroll:allocation}:{})});
-    tx.create(db.collection('audit').doc(),{username:data.username,selection:'Late league entry',from:'pending',to:approve?'approved':'declined',actor,reason:approve?'Commissioner allotted starting bankroll':'Commissioner declined entry',delta:approve?allocation:0,at});
+    tx.update(ref, {
+      status: approve ? 'approved' : 'declined',
+      resolvedAt: at,
+      resolvedBy: actor,
+      ...(approve ? { bankroll: allocation } : {}),
+    });
+    tx.create(db.collection('audit').doc(), {
+      username: data.username,
+      selection: 'Late league entry',
+      from: 'pending',
+      to: approve ? 'approved' : 'declined',
+      actor,
+      reason: approve
+        ? 'Commissioner allotted starting bankroll'
+        : 'Commissioner declined entry',
+      delta: approve ? allocation : 0,
+      at,
+    });
   });
-  return {ok:true};
+  return { ok: true };
 });
 export const placeBet = clean(async (req) => {
   const id = uid(req),
@@ -150,7 +215,7 @@ export const placeBet = clean(async (req) => {
       0,
     );
     let event = null;
-    if (input.eventId) {
+    if (input.eventId && input.market !== 'Parlay') {
       if (
         typeof input.eventId !== 'string' ||
         !/^[a-zA-Z0-9_-]{1,100}$/.test(input.eventId)
@@ -248,6 +313,53 @@ export const placeBet = clean(async (req) => {
         ' @ ' +
         event.home_team;
     }
+    if (bet.market === 'Parlay') {
+      if (
+        !Array.isArray(input.legs) ||
+        input.legs.length < 2 ||
+        input.legs.length > MAX_LEGS
+      )
+        throw Error(`Add between 2 and ${MAX_LEGS} parlay legs.`);
+      bet.legs = [];
+      for (const raw of input.legs) {
+        if (
+          !raw ||
+          (raw.eventId &&
+            (typeof raw.eventId !== 'string' ||
+              !/^[a-zA-Z0-9_-]{1,100}$/.test(raw.eventId)))
+        )
+          throw Error('Invalid parlay game identifier.');
+        const gameDoc = raw.eventId
+          ? await tx.get(db.doc('events/' + raw.eventId))
+          : null;
+        if (raw.eventId && !gameDoc?.exists)
+          throw Error('A parlay game is no longer available.');
+        const game = gameDoc?.data();
+        const rosters =
+          game && raw.market === 'Player prop'
+            ? await Promise.all(
+                [game.homeTeamId, game.awayTeamId].map((team) =>
+                  tx.get(db.doc(`rosters/${game.season}_${team}`)),
+                ),
+              )
+            : [];
+        bet.legs.push(
+          normalizeParlayLeg(
+            raw,
+            game,
+            rosters.flatMap((r) => r.data()?.players ?? []),
+            now,
+            c,
+          ),
+        );
+      }
+      validateParlayLegs(bet.legs);
+      bet.startsAt = Math.min(...bet.legs.map((l) => l.startsAt));
+      bet.eventId = null;
+      bet.side = null;
+      bet.line = null;
+      bet.selection = `${bet.legs.length}-leg parlay`;
+    }
     validateBet(bet, now, c, m.data().balance, opening, staked);
     tx.create(ref, {
       ...bet,
@@ -258,10 +370,11 @@ export const placeBet = clean(async (req) => {
       paid: 0,
       createdAt: now,
       autoEligible:
-        !!event &&
-        bet.gradingRule === 'full-game' &&
-        (['Moneyline', 'Spread', 'Total'].includes(bet.market) ||
-          !!bet.propKey),
+        bet.market === 'Parlay' ||
+        (!!event &&
+          bet.gradingRule === 'full-game' &&
+          (['Moneyline', 'Spread', 'Total'].includes(bet.market) ||
+            !!bet.propKey)),
       manualOverride: false,
     });
     tx.update(m.ref, { balance: m.data().balance - bet.stake });
@@ -282,7 +395,10 @@ export const deleteBet = clean(async (req) => {
   return { ok: true };
 });
 async function settle(betId, result, actor, reason, automatic = false) {
-  if (!['won', 'lost', 'push', 'void'].includes(result))
+  if (
+    !(automatic && result === null) &&
+    !['won', 'lost', 'push', 'void'].includes(result)
+  )
     throw Error('Choose win, loss, push, or void.');
   await db.runTransaction(async (tx) => {
     const ref = db.doc('bets/' + betId),
@@ -293,11 +409,35 @@ async function settle(betId, result, actor, reason, automatic = false) {
     }
     const bet = b.data();
     if (automatic && (bet.status !== 'pending' || bet.manualOverride)) return;
+    let gradedLegs;
+    if (automatic && bet.market === 'Parlay') {
+      const eventIds = [
+        ...new Set(bet.legs.map((l) => l.eventId).filter(Boolean)),
+      ];
+      const eventDocs = await Promise.all(
+        eventIds.map((eventId) => tx.get(db.doc('events/' + eventId))),
+      );
+      const statDocs = await Promise.all(
+        eventIds.map((eventId) => tx.get(db.doc('gameStats/' + eventId))),
+      );
+      const grading = gradeParlay(
+        bet,
+        Object.fromEntries(eventDocs.map((d) => [d.id, d.data()])),
+        Object.fromEntries(statDocs.map((d) => [d.id, d.data()])),
+      );
+      result = grading.result;
+      gradedLegs = grading.legs;
+      if (!result) {
+        tx.update(ref, { legs: gradedLegs });
+        return;
+      }
+    }
     if (Date.now() < bet.startsAt && result !== 'void')
       throw Error('Wait until the event has started.');
     const m = await tx.get(db.doc('members/' + bet.uid));
     if (!m.exists) throw Error('Player not found.');
-    if (bet.status === result && (automatic || bet.review?.status !== 'open')) return;
+    if (bet.status === result && (automatic || bet.review?.status !== 'open'))
+      return;
     const paid = payout(bet.stake, bet.odds, result),
       delta = paid - bet.paid,
       at = Date.now();
@@ -309,9 +449,19 @@ async function settle(betId, result, actor, reason, automatic = false) {
       manualOverride: !automatic,
       settledBy: actor,
       settlementReason: reason,
-      ...(!automatic && bet.review?.status === 'open' ? {
-        review: { ...bet.review, status: 'resolved', resolution: reason, resolvedBy: actor, resolvedAt: at, settledAt: at },
-      } : {}),
+      ...(gradedLegs ? { legs: gradedLegs } : {}),
+      ...(!automatic && bet.review?.status === 'open'
+        ? {
+            review: {
+              ...bet.review,
+              status: 'resolved',
+              resolution: reason,
+              resolvedBy: actor,
+              resolvedAt: at,
+              settledAt: at,
+            },
+          }
+        : {}),
     });
     tx.create(db.collection('ledger').doc(), {
       uid: bet.uid,
@@ -355,19 +505,91 @@ export const settleBet = clean(async (req) => {
   await settle(betId, result, id, reason.trim());
   return { ok: true };
 });
+export const verifyParlayLeg = clean(async (req) => {
+  const actor = uid(req);
+  admin(actor, await config());
+  const { betId, legIndex, result, reason } = req.data ?? {};
+  if (
+    typeof betId !== 'string' ||
+    !/^[a-zA-Z0-9_-]{1,160}$/.test(betId) ||
+    !Number.isInteger(legIndex) ||
+    !['won', 'lost', 'push', 'void'].includes(result) ||
+    typeof reason !== 'string' ||
+    reason.trim().length < 3 ||
+    reason.length > 500
+  )
+    throw Error('Choose a leg result and provide a verification reason.');
+  await db.runTransaction(async (tx) => {
+    const ref = db.doc('bets/' + betId),
+      snapshot = await tx.get(ref);
+    const bet = snapshot.data(),
+      leg = bet?.legs?.[legIndex];
+    if (
+      bet?.market !== 'Parlay' ||
+      bet.status !== 'pending' ||
+      bet.manualOverride ||
+      leg?.market !== 'Other'
+    )
+      throw Error('Choose an Other leg in a pending parlay.');
+    if (Date.now() < leg.startsAt && result !== 'void')
+      throw Error('Wait until the leg has started.');
+    const at = Date.now();
+    const legs = bet.legs.map((l, i) =>
+      i === legIndex
+        ? {
+            ...l,
+            status: result,
+            verifiedBy: actor,
+            verifiedAt: at,
+            verificationReason: reason.trim(),
+          }
+        : l,
+    );
+    tx.update(ref, { legs });
+    tx.create(db.collection('audit').doc(), {
+      betId,
+      username: bet.username,
+      selection: leg.selection,
+      from: leg.status,
+      to: result,
+      actor,
+      reason: reason.trim(),
+      delta: 0,
+      at,
+    });
+  });
+  await settle(
+    betId,
+    null,
+    'parlay verification',
+    'Parlay results checked after Other leg verification.',
+    true,
+  );
+  return { ok: true };
+});
 export const flagBet = clean(async (req) => {
   const actor = uid(req);
   const { betId, reason } = req.data ?? {};
-  if (typeof betId !== 'string' || !betId || betId.includes('/')) throw Error('Invalid bet.');
+  if (typeof betId !== 'string' || !betId || betId.includes('/'))
+    throw Error('Invalid bet.');
   await db.runTransaction(async (tx) => {
-    const ref = db.doc('bets/' + betId), snapshot = await tx.get(ref);
+    const ref = db.doc('bets/' + betId),
+      snapshot = await tx.get(ref);
     if (!snapshot.exists) throw Error('Bet not found.');
-    const bet = snapshot.data(), at = Date.now();
+    const bet = snapshot.data(),
+      at = Date.now();
     const review = createReview(bet, actor, reason, at);
     tx.update(ref, { review });
     tx.create(db.collection('audit').doc(), {
-      betId, username: bet.username, selection: bet.selection, from: bet.status,
-      to: 'review requested', actor, reason: review.reason, delta: 0, at,
+      betId,
+      username: bet.username,
+      selection: bet.selection,
+      from: bet.status,
+      to: 'review requested',
+      actor,
+      reason: review.reason,
+      delta: 0,
+      at,
     });
   });
   return { ok: true };
@@ -472,6 +694,21 @@ export const syncFootballScores = onSchedule(
     if (!c.autoSettlementEnabled) return;
     for (const doc of pending.docs) {
       const b = doc.data();
+      if (
+        b.market === 'Parlay' &&
+        Array.isArray(b.legs) &&
+        b.autoEligible &&
+        !b.manualOverride
+      ) {
+        await settle(
+          doc.id,
+          null,
+          'nflverse',
+          'Parlay legs checked against final scores, player statistics and verified Other results.',
+          true,
+        );
+        continue;
+      }
       if (
         !b.autoEligible ||
         b.manualOverride ||

@@ -707,3 +707,45 @@ textarea {
     max-width: none;
   }
 }
+.parlay-leg {
+  position: relative;
+  min-width: 0;
+  padding: 16px;
+  margin: 14px 0;
+  border: 1px solid #d7dce0;
+  border-radius: 12px;
+}
+.parlay-leg legend {
+  padding: 0 8px;
+  font-weight: 700;
+}
+.remove-leg {
+  position: absolute;
+  top: -15px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: #c93434;
+  color: white;
+  cursor: pointer;
+}
+.remove-leg:focus-visible {
+  outline: 3px solid #111;
+  outline-offset: 3px;
+}
+.parlay-results {
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.leg-verification {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}

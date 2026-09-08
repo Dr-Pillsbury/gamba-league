@@ -14,6 +14,11 @@ import {
   CircleAlert,
 } from 'lucide-react';
 import { auth, db, call, login } from '@/lib/firebase';
+import {
+  ParlayBuilder,
+  newParlayLeg,
+  type ParlayDraft,
+} from '@/components/parlay-builder';
 import { propsForPosition } from '@/functions/football.js';
 import { LEAGUE_RULES } from '@/functions/reviews.js';
 import {
@@ -127,6 +132,8 @@ export default function Home() {
     [line, setLine] = useState('');
   const [playerId, setPlayerId] = useState(''),
     [propKey, setPropKey] = useState('');
+  const [parlayLegs, setParlayLegs] = useState<ParlayDraft[]>([]);
+  const [legReasons, setLegReasons] = useState<Record<string, string>>({});
   const [flaggingBet, setFlaggingBet] = useState(''),
     [flagReason, setFlagReason] = useState('');
   const [selectedBet, setSelectedBet] = useState(''),
@@ -210,12 +217,27 @@ export default function Home() {
     return () => stops.forEach((s) => s());
   }, [me?.id, commissioner]);
   useEffect(() => {
-    setJoinRequests([]); setOwnJoinRequest(null);
+    setJoinRequests([]);
+    setOwnJoinRequest(null);
     if (!user) return;
     const fail = (e: Error) => setError(e.message);
-    const stops = [onSnapshot(doc(db, 'joinRequests', user.uid), (d) => setOwnJoinRequest(d.exists() ? {id:d.id,...d.data()} : null), fail)];
-    if (commissioner) stops.push(onSnapshot(collection(db,'joinRequests'), (s) => setJoinRequests(s.docs.map(d=>({id:d.id,...d.data()}))), fail));
-    return () => stops.forEach(stop=>stop());
+    const stops = [
+      onSnapshot(
+        doc(db, 'joinRequests', user.uid),
+        (d) => setOwnJoinRequest(d.exists() ? { id: d.id, ...d.data() } : null),
+        fail,
+      ),
+    ];
+    if (commissioner)
+      stops.push(
+        onSnapshot(
+          collection(db, 'joinRequests'),
+          (s) =>
+            setJoinRequests(s.docs.map((d) => ({ id: d.id, ...d.data() }))),
+          fail,
+        ),
+      );
+    return () => stops.forEach((stop) => stop());
   }, [user, commissioner]);
   const start = config?.startDate ?? '2026-09-08',
     actualWeek = now ? weekAt(now, start) : 0,
@@ -320,12 +342,21 @@ export default function Home() {
       selection:
         structured || structuredProp ? 'Structured game pick' : selection,
       market,
+      legs:
+        market === 'Parlay'
+          ? parlayLegs.map((leg) => ({
+              ...leg,
+              eventId: leg.eventId === 'manual' ? null : leg.eventId,
+              line: leg.line === '' ? null : Number(leg.line),
+              startsAt: Date.parse(leg.startsAt) || null,
+            }))
+          : null,
       odds: Number(odds),
       stake: Math.round(cents),
       startsAt: chosenEvent
         ? Date.parse(chosenEvent.commence_time)
         : Date.parse(startsAt),
-      eventId: eventId === 'manual' ? null : eventId,
+      eventId: eventId === 'manual' || market === 'Parlay' ? null : eventId,
       side: structured || structuredProp ? side : null,
       line:
         (structured && market !== 'Moneyline') || structuredProp
@@ -341,6 +372,7 @@ export default function Home() {
       await call('placeBet', { ...payload, requestId: request.current.id });
       request.current = { signature: '', id: '' };
       setSelection('');
+      setParlayLegs([]);
       setStake('10.00');
     }, 'Bet placed. Everyone in the league can now see your pick.');
   }
@@ -431,7 +463,9 @@ export default function Home() {
               {actualWeek < 1 ? 'Season opens' : 'Week ' + week + ' deadline'}
               <strong>
                 {date(
-                  actualWeek < 1 ? weekStart(start, 1) : weekEnd(start, week) - 60000,
+                  actualWeek < 1
+                    ? weekStart(start, 1)
+                    : weekEnd(start, week) - 60000,
                 )}
               </strong>
             </span>
@@ -476,7 +510,9 @@ export default function Home() {
             e.preventDefault();
             action(
               () => call('joinLeague', { username }),
-              now >= weekEnd(start, 1) ? 'Late-entry request sent to the commissioner.' : 'Welcome to the league. Your $180 bankroll is ready.',
+              now >= weekEnd(start, 1)
+                ? 'Late-entry request sent to the commissioner.'
+                : 'Welcome to the league. Your $180 bankroll is ready.',
             );
           }}
         >
@@ -484,8 +520,10 @@ export default function Home() {
             <h2>Pick your league name.</h2>
             <p>
               3–20 letters, numbers, or underscores. This name is public to
-              players. Joining is open through Week 1. Later entries need commissioner approval and an assigned bankroll.
-              {ownJoinRequest?.status === 'declined' && ' Your previous request was declined; you may submit a revised request.'}
+              players. Joining is open through Week 1. Later entries need
+              commissioner approval and an assigned bankroll.
+              {ownJoinRequest?.status === 'declined' &&
+                ' Your previous request was declined; you may submit a revised request.'}
             </p>
           </div>
           <label className="sr-only" htmlFor="username">
@@ -502,10 +540,19 @@ export default function Home() {
             onChange={(e) => setUsername(e.target.value)}
           />
           <Button
-            disabled={busy || !backendEnabled || ownJoinRequest?.status === 'pending' || lateJoinBankroll(now,start) === 0}
+            disabled={
+              busy ||
+              !backendEnabled ||
+              ownJoinRequest?.status === 'pending' ||
+              lateJoinBankroll(now, start) === 0
+            }
             type="submit"
           >
-            {ownJoinRequest?.status === 'pending' ? 'Awaiting commissioner approval' : now >= weekEnd(start,1) ? 'Request late entry' : 'Join league'}
+            {ownJoinRequest?.status === 'pending'
+              ? 'Awaiting commissioner approval'
+              : now >= weekEnd(start, 1)
+                ? 'Request late entry'
+                : 'Join league'}
           </Button>
         </form>
       )}
@@ -552,7 +599,8 @@ export default function Home() {
                   {config?.lastScoresSyncAt
                     ? 'Last refreshed ' + date(config.lastScoresSyncAt)
                     : 'Waiting for the first schedule import.'}{' '}
-                  Schedules and rosters from nflverse. Results settle the next day when final data is available.
+                  Schedules and rosters from nflverse. Results settle the next
+                  day when final data is available.
                 </p>
                 {schedule.length ? (
                   schedule.map((game) => (
@@ -583,12 +631,10 @@ export default function Home() {
                           setEventId(game.id);
                           setPlayerId('');
                           setPropKey('');
-                          document
-                            .getElementById('bet-slip')
-                            ?.scrollIntoView({
-                              behavior: 'smooth',
-                              block: 'start',
-                            });
+                          document.getElementById('bet-slip')?.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'start',
+                          });
                         }}
                       >
                         Choose game <ArrowUpRight size={16} />
@@ -604,8 +650,8 @@ export default function Home() {
                         : 'Sign in to see the schedule.'}
                     </h3>
                     <p>
-                      Games and team rosters appear here after the first nflverse
-                      import.
+                      Games and team rosters appear here after the first
+                      nflverse import.
                     </p>
                   </div>
                 )}
@@ -753,12 +799,25 @@ export default function Home() {
                     <article className="bet-card" key={b.id}>
                       <div className="bet-meta">
                         <strong>{b.username}</strong>
-                        <span>
-                          W{b.week} · FanDuel CT
-                        </span>
+                        <span>W{b.week} · FanDuel CT</span>
                         <span className={'status ' + b.status}>{b.status}</span>
                       </div>
                       <h3>{b.selection}</h3>
+                      {b.legs && (
+                        <ol className="parlay-results">
+                          {b.legs.map((leg: any, i: number) => (
+                            <li key={i}>
+                              {leg.selection}{' '}
+                              <span className="tag">
+                                {leg.status === 'pending' &&
+                                leg.market === 'Other'
+                                  ? 'Needs verification'
+                                  : leg.status}
+                              </span>
+                            </li>
+                          ))}
+                        </ol>
+                      )}
                       <p className="hint">
                         {b.market} · {b.odds > 0 ? '+' : ''}
                         {b.odds} · {date(b.startsAt)}
@@ -788,24 +847,102 @@ export default function Home() {
                             : 'Commissioner review · custom market'}
                         {b.settlementReason ? ' — ' + b.settlementReason : ''}
                       </p>
-                      {b.review && <p className="notice">{b.review.status === 'open' ? 'Awaiting commissioner review' : 'Review resolved'}: {b.review.reason}{b.review.resolution ? ' — ' + b.review.resolution : ''}</p>}
+                      {b.review && (
+                        <p className="notice">
+                          {b.review.status === 'open'
+                            ? 'Awaiting commissioner review'
+                            : 'Review resolved'}
+                          : {b.review.reason}
+                          {b.review.resolution
+                            ? ' — ' + b.review.resolution
+                            : ''}
+                        </p>
+                      )}
                       {b.uid === user?.uid && b.status === 'pending' && (
-                        <Button type="button" variant="outline" disabled={busy || !backendEnabled} onClick={() => {
-                          if (window.confirm(`Delete this bet and return your ${money(b.stake)} stake? This bet will no longer count toward your weekly minimum.`)) {
-                            action(() => call('deleteBet', { betId: b.id }), 'Bet deleted. Your stake has been returned.');
-                          }
-                        }}>Delete bet</Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={busy || !backendEnabled}
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                `Delete this bet and return your ${money(b.stake)} stake? This bet will no longer count toward your weekly minimum.`,
+                              )
+                            ) {
+                              action(
+                                () => call('deleteBet', { betId: b.id }),
+                                'Bet deleted. Your stake has been returned.',
+                              );
+                            }
+                          }}
+                        >
+                          Delete bet
+                        </Button>
                       )}
-                      {b.uid === user?.uid && ['won', 'lost'].includes(b.status) && b.review?.status !== 'open' && !(b.review?.status === 'resolved' && b.review.settledAt === b.settledAt) && (
-                        <Button type="button" variant="outline" disabled={busy || !backendEnabled} onClick={() => { setFlaggingBet(b.id); setFlagReason(''); }}>Flag for commissioner review</Button>
-                      )}
-                      {flaggingBet === b.id && b.review?.status !== 'open' && !(b.review?.status === 'resolved' && b.review.settledAt === b.settledAt) && (
-                        <form onSubmit={(e) => { e.preventDefault(); action(async () => { await call('flagBet', { betId: b.id, reason: flagReason }); setFlaggingBet(''); setFlagReason(''); }, 'Flag sent to the commissioner.'); }}>
-                          <label>Describe the discrepancy<textarea required minLength={3} maxLength={500} value={flagReason} onChange={(e) => setFlagReason(e.target.value)} placeholder="Incorrect result, stat correction, or injury protection…" /></label>
-                          <Button type="submit" disabled={busy || !backendEnabled}>Submit review request</Button>{' '}
-                          <Button type="button" variant="outline" onClick={() => setFlaggingBet('')}>Cancel</Button>
-                        </form>
-                      )}
+                      {b.uid === user?.uid &&
+                        ['won', 'lost'].includes(b.status) &&
+                        b.review?.status !== 'open' &&
+                        !(
+                          b.review?.status === 'resolved' &&
+                          b.review.settledAt === b.settledAt
+                        ) && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={busy || !backendEnabled}
+                            onClick={() => {
+                              setFlaggingBet(b.id);
+                              setFlagReason('');
+                            }}
+                          >
+                            Flag for commissioner review
+                          </Button>
+                        )}
+                      {flaggingBet === b.id &&
+                        b.review?.status !== 'open' &&
+                        !(
+                          b.review?.status === 'resolved' &&
+                          b.review.settledAt === b.settledAt
+                        ) && (
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              action(async () => {
+                                await call('flagBet', {
+                                  betId: b.id,
+                                  reason: flagReason,
+                                });
+                                setFlaggingBet('');
+                                setFlagReason('');
+                              }, 'Flag sent to the commissioner.');
+                            }}
+                          >
+                            <label>
+                              Describe the discrepancy
+                              <textarea
+                                required
+                                minLength={3}
+                                maxLength={500}
+                                value={flagReason}
+                                onChange={(e) => setFlagReason(e.target.value)}
+                                placeholder="Incorrect result, stat correction, or injury protection…"
+                              />
+                            </label>
+                            <Button
+                              type="submit"
+                              disabled={busy || !backendEnabled}
+                            >
+                              Submit review request
+                            </Button>{' '}
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => setFlaggingBet('')}
+                            >
+                              Cancel
+                            </Button>
+                          </form>
+                        )}
                       {b.reviewReason && (
                         <p className="tiny">{b.reviewReason}</p>
                       )}
@@ -832,8 +969,8 @@ export default function Home() {
                   </li>
                   <li>
                     <strong>Wager at least $10 each week.</strong> A week starts
-                    Tuesday at 10 a.m. and ends Monday at 11:59 p.m.
-                    Eastern. Daylight saving time is respected.
+                    Tuesday at 10 a.m. and ends Monday at 11:59 p.m. Eastern.
+                    Daylight saving time is respected.
                   </li>
                   <li>
                     <strong>Keep future weeks funded.</strong> Reserve $10 for
@@ -854,17 +991,20 @@ export default function Home() {
                     minimum; voids do not.
                   </li>
                   <li>
-                    <strong>Everyone can see the picks.</strong> Freeform props,
-                    parlays, and unusual markets need a clear description of
-                    every condition and a commissioner result. Enter a parlay’s
-                    combined odds and earliest leg start.
+                    <strong>Everyone can see the picks.</strong> Freeform props
+                    and unusual markets need a clear description of every
+                    condition and a commissioner result. Structured parlay legs
+                    grade automatically; only Other legs need verification.
+                    Enter a parlay’s combined odds and earliest leg start.
                   </li>
                   <li>
                     <strong>Results are traceable.</strong> Supported player
                     props use explicit final statistics; missing stats and
-                    absent players require commissioner review. All bets follow FanDuel Connecticut rules.
-                    Injury protection, participation and special cases are verified by the commissioner;
-                    an injury does not automatically refund a bet. Players can flag posted wins or losses. Supported feed-linked full-game
+                    absent players require commissioner review. All bets follow
+                    FanDuel Connecticut rules. Injury protection, participation
+                    and special cases are verified by the commissioner; an
+                    injury does not automatically refund a bet. Players can flag
+                    posted wins or losses. Supported feed-linked full-game
                     moneylines, spreads, and totals can settle from final
                     scores, including overtime. The commissioner can correct
                     results with a reason. Corrections adjust the balance by the
@@ -885,25 +1025,181 @@ export default function Home() {
               <TabsContent value="commissioner">
                 <section className="panel">
                   <h2>Late-entry requests</h2>
-                  {joinRequests.filter(r=>r.status==='pending').length===0 && <p className="hint">No late-entry requests.</p>}
-                  {joinRequests.filter(r=>r.status==='pending').map(r=><form className="bet-card" key={r.id} onSubmit={e=>{e.preventDefault(); action(()=>call('reviewJoinRequest',{requestId:r.id,approve:true,bankroll:Math.round(Number(joinBudgets[r.id] ?? lateJoinBankroll(now,start)/100)*100)}),'Late entry approved.');}}>
-                    <strong>{r.username}</strong>
-                    <label>Starting bankroll ($)<input type="number" min="0" max="1000000" step="0.01" required value={joinBudgets[r.id] ?? String(lateJoinBankroll(now,start)/100)} onChange={e=>setJoinBudgets({...joinBudgets,[r.id]:e.target.value})}/></label>
-                    <p className="hint">Default: $10 for each remaining betting week, including the current week while it is open.</p>
-                    <Button type="submit" disabled={busy || !backendEnabled}>Approve entry</Button>{' '}
-                    <Button type="button" variant="outline" disabled={busy || !backendEnabled} onClick={()=>action(()=>call('reviewJoinRequest',{requestId:r.id,approve:false}),'Entry request declined.')}>Decline</Button>
-                  </form>)}
+                  {joinRequests.filter((r) => r.status === 'pending').length ===
+                    0 && <p className="hint">No late-entry requests.</p>}
+                  {joinRequests
+                    .filter((r) => r.status === 'pending')
+                    .map((r) => (
+                      <form
+                        className="bet-card"
+                        key={r.id}
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          action(
+                            () =>
+                              call('reviewJoinRequest', {
+                                requestId: r.id,
+                                approve: true,
+                                bankroll: Math.round(
+                                  Number(
+                                    joinBudgets[r.id] ??
+                                      lateJoinBankroll(now, start) / 100,
+                                  ) * 100,
+                                ),
+                              }),
+                            'Late entry approved.',
+                          );
+                        }}
+                      >
+                        <strong>{r.username}</strong>
+                        <label>
+                          Starting bankroll ($)
+                          <input
+                            type="number"
+                            min="0"
+                            max="1000000"
+                            step="0.01"
+                            required
+                            value={
+                              joinBudgets[r.id] ??
+                              String(lateJoinBankroll(now, start) / 100)
+                            }
+                            onChange={(e) =>
+                              setJoinBudgets({
+                                ...joinBudgets,
+                                [r.id]: e.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                        <p className="hint">
+                          Default: $10 for each remaining betting week,
+                          including the current week while it is open.
+                        </p>
+                        <Button
+                          type="submit"
+                          disabled={busy || !backendEnabled}
+                        >
+                          Approve entry
+                        </Button>{' '}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={busy || !backendEnabled}
+                          onClick={() =>
+                            action(
+                              () =>
+                                call('reviewJoinRequest', {
+                                  requestId: r.id,
+                                  approve: false,
+                                }),
+                              'Entry request declined.',
+                            )
+                          }
+                        >
+                          Decline
+                        </Button>
+                      </form>
+                    ))}
                   <h2>Player review requests</h2>
-                  {bets.filter((b) => b.review?.status === 'open').length === 0 && <p className="hint">No player flags awaiting review.</p>}
-                  {bets.filter((b) => b.review?.status === 'open').map((b) => <article className="bet-card" key={b.id}>
-                    <strong>{b.username} · {b.selection}</strong>
-                    <p>{b.review.reason}</p><p className="tiny">Posted result: {b.status} · {date(b.review.requestedAt)}</p>
-                    <Button type="button" variant="outline" onClick={() => { setSelectedBet(b.id); setResult(b.status); setReason(''); }}>Review this result</Button>
-                  </article>)}
+                  {bets.filter((b) => b.review?.status === 'open').length ===
+                    0 && (
+                    <p className="hint">No player flags awaiting review.</p>
+                  )}
+                  {bets
+                    .filter((b) => b.review?.status === 'open')
+                    .map((b) => (
+                      <article className="bet-card" key={b.id}>
+                        <strong>
+                          {b.username} · {b.selection}
+                        </strong>
+                        <p>{b.review.reason}</p>
+                        <p className="tiny">
+                          Posted result: {b.status} ·{' '}
+                          {date(b.review.requestedAt)}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedBet(b.id);
+                            setResult(b.status);
+                            setReason('');
+                          }}
+                        >
+                          Review this result
+                        </Button>
+                      </article>
+                    ))}
+                  <h2>Other parlay legs to verify</h2>
+                  {bets
+                    .filter(
+                      (b) => b.market === 'Parlay' && b.status === 'pending',
+                    )
+                    .flatMap((b) =>
+                      (b.legs ?? []).map((leg: any, i: number) => {
+                        if (leg.market !== 'Other' || leg.verifiedBy)
+                          return null;
+                        const key = b.id + '_' + i;
+                        return (
+                          <article className="bet-card" key={key}>
+                            <strong>
+                              {b.username} · Leg {i + 1}
+                            </strong>
+                            <p>{leg.selection}</p>
+                            <label>
+                              Verification source or reason
+                              <input
+                                required
+                                minLength={3}
+                                maxLength={500}
+                                value={legReasons[key] ?? ''}
+                                onChange={(e) =>
+                                  setLegReasons({
+                                    ...legReasons,
+                                    [key]: e.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <div className="leg-verification">
+                              {['won', 'lost', 'push', 'void'].map((value) => (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  key={value}
+                                  disabled={
+                                    busy ||
+                                    !backendEnabled ||
+                                    (legReasons[key] ?? '').trim().length < 3 ||
+                                    (now < leg.startsAt && value !== 'void')
+                                  }
+                                  onClick={() =>
+                                    action(
+                                      () =>
+                                        call('verifyParlayLeg', {
+                                          betId: b.id,
+                                          legIndex: i,
+                                          result: value,
+                                          reason: legReasons[key],
+                                        }),
+                                      'Leg verified. Parlay payout checked.',
+                                    )
+                                  }
+                                >
+                                  {value}
+                                </Button>
+                              ))}
+                            </div>
+                          </article>
+                        );
+                      }),
+                    )}
                   <h2>Results & corrections</h2>
                   <p className="hint">
-                    Confirm the existing result to close a flag, or choose a correction. Every balance
-                    adjustment is recorded for the league.
+                    Confirm the existing result to close a flag, or choose a
+                    correction. Every balance adjustment is recorded for the
+                    league.
                   </p>
                   <form
                     onSubmit={(e) => {
@@ -1030,20 +1326,6 @@ export default function Home() {
             </div>
             <form onSubmit={submit}>
               <label>
-                Market
-                <Picker
-                  value={market}
-                  onChange={(v) => {
-                    setMarket(v);
-                    setSide(
-                      ['Total', 'Player prop'].includes(v) ? 'over' : 'home',
-                    );
-                  }}
-                  label="Bet market"
-                  items={markets.map((v) => ({ value: v, label: v }))}
-                />
-              </label>
-              <label>
                 Game
                 <Picker
                   value={eventId}
@@ -1061,8 +1343,7 @@ export default function Home() {
                           !e.completed &&
                           (e.provider !== 'nflverse' || e.status === 'NS') &&
                           Date.parse(e.commence_time) > now &&
-                          Date.parse(e.commence_time) <
-                            weekEnd(start, week),
+                          Date.parse(e.commence_time) < weekEnd(start, week),
                       )
                       .map((e) => ({
                         value: e.id,
@@ -1071,13 +1352,46 @@ export default function Home() {
                   ]}
                 />
               </label>
+              <label>
+                Market
+                <Picker
+                  value={market}
+                  onChange={(v) => {
+                    setMarket(v);
+                    if (v === 'Parlay' && !parlayLegs.length)
+                      setParlayLegs([
+                        newParlayLeg(eventId),
+                        newParlayLeg(eventId),
+                      ]);
+                    setSide(
+                      ['Total', 'Player prop'].includes(v) ? 'over' : 'home',
+                    );
+                  }}
+                  label="Bet market"
+                  items={markets.map((v) => ({ value: v, label: v }))}
+                />
+              </label>
               {chosenEvent && (
                 <p className="tiny">
                   {date(Date.parse(chosenEvent.commence_time))} ·{' '}
                   {chosenEvent.venue || 'Scheduled game'}
                 </p>
               )}
-              {structuredProp ? (
+              {market === 'Parlay' ? (
+                <ParlayBuilder
+                  legs={parlayLegs}
+                  onChange={setParlayLegs}
+                  defaultEventId={eventId}
+                  rosters={rosters}
+                  events={events.filter(
+                    (e) =>
+                      !e.completed &&
+                      (e.provider !== 'nflverse' || e.status === 'NS') &&
+                      Date.parse(e.commence_time) > now &&
+                      Date.parse(e.commence_time) < weekEnd(start, week),
+                  )}
+                />
+              ) : structuredProp ? (
                 <>
                   <label>
                     Player
@@ -1134,38 +1448,44 @@ export default function Home() {
                     />
                   </label>
                   {propKey === 'anytime_td' ? (
-                    <p className="hint">Player must score at least one rushing or receiving touchdown. Passing touchdowns do not count.</p>
-                  ) : <div className="two">
-                    <label>
-                      Direction
-                      <Picker
-                        value={side}
-                        onChange={setSide}
-                        label="Prop direction"
-                        items={[
-                          { value: 'over', label: 'Over' },
-                          { value: 'under', label: 'Under' },
-                        ]}
-                      />
-                    </label>
-                    <label>
-                      Line
-                      <input
-                        required
-                        min="0"
-                        max="10000"
-                        type="number"
-                        step="0.5"
-                        value={line}
-                        onChange={(e) => setLine(e.target.value)}
-                        placeholder="e.g. 64.5"
-                      />
-                    </label>
-                  </div>}
+                    <p className="hint">
+                      Player must score at least one rushing or receiving
+                      touchdown. Passing touchdowns do not count.
+                    </p>
+                  ) : (
+                    <div className="two">
+                      <label>
+                        Direction
+                        <Picker
+                          value={side}
+                          onChange={setSide}
+                          label="Prop direction"
+                          items={[
+                            { value: 'over', label: 'Over' },
+                            { value: 'under', label: 'Under' },
+                          ]}
+                        />
+                      </label>
+                      <label>
+                        Line
+                        <input
+                          required
+                          min="0"
+                          max="10000"
+                          type="number"
+                          step="0.5"
+                          value={line}
+                          onChange={(e) => setLine(e.target.value)}
+                          placeholder="e.g. 64.5"
+                        />
+                      </label>
+                    </div>
+                  )}
                   <p className="tiny">
                     Prop choices are based on position, not a live sportsbook
                     listing. Enter your sportsbook’s odds and, when applicable,
-                    line. Anytime touchdown counts rushing or receiving touchdowns.
+                    line. Anytime touchdown counts rushing or receiving
+                    touchdowns.
                   </p>
                 </>
               ) : structured ? (
@@ -1230,7 +1550,7 @@ export default function Home() {
                   />
                 </label>
               )}
-              {eventId === 'manual' && (
+              {eventId === 'manual' && market !== 'Parlay' && (
                 <label>
                   Event starts (your device’s local time)
                   <input
@@ -1241,7 +1561,14 @@ export default function Home() {
                   />
                 </label>
               )}
-              <p className="hint">All bets follow <a href={LEAGUE_RULES.url} target="_blank" rel="noreferrer">FanDuel Connecticut rules</a>. Injury protection and special cases require commissioner verification.</p>
+              <p className="hint">
+                All bets follow{' '}
+                <a href={LEAGUE_RULES.url} target="_blank" rel="noreferrer">
+                  FanDuel Connecticut rules
+                </a>
+                . Injury protection and special cases require commissioner
+                verification.
+              </p>
               <div className="two">
                 <label>
                   American odds
@@ -1286,7 +1613,8 @@ export default function Home() {
                       !me ||
                       !inSeason ||
                       available === 0 ||
-                      (structuredProp && (!playerId || !propKey))))
+                      (structuredProp && (!playerId || !propKey)) ||
+                      (market === 'Parlay' && parlayLegs.length < 2)))
                 }
               >
                 {busy
@@ -1323,7 +1651,16 @@ export default function Home() {
       </div>
       <footer>
         PLAY MONEY. REAL BRAGGING RIGHTS.
-        <span>Tuesday 10 a.m. → Monday 11:59 p.m. · Eastern time · Data: <a href="https://github.com/nflverse/nflverse-data" target="_blank" rel="noreferrer">nflverse</a></span>
+        <span>
+          Tuesday 10 a.m. → Monday 11:59 p.m. · Eastern time · Data:{' '}
+          <a
+            href="https://github.com/nflverse/nflverse-data"
+            target="_blank"
+            rel="noreferrer"
+          >
+            nflverse
+          </a>
+        </span>
       </footer>
     </main>
   );
