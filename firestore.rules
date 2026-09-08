@@ -1,0 +1,15 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  function signedIn(){return request.auth != null && request.auth.token.firebase.sign_in_provider == 'google.com';}
+  function member(){return signedIn() && exists(/databases/$(database)/documents/members/$(request.auth.uid));}
+  match /config/league {allow read: if signedIn(); allow write: if false;}
+  match /members/{uid} {allow read: if signedIn(); allow write: if false;}
+  match /bets/{id} {allow read: if member(); allow write: if false;}
+  match /ledger/{id} {allow read: if member(); allow write: if false;}
+  match /snapshots/{id} {allow read: if member(); allow write: if false;}
+  match /events/{id} {allow read: if signedIn(); allow write: if false;}
+  match /audit/{id} {allow read: if member(); allow write: if false;}
+  match /{document=**} {allow read,write: if false;}
+ }
+}

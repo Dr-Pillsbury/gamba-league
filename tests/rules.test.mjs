@@ -1,0 +1,124 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  funds,
+  payout,
+  weekAt,
+  weekStart,
+  validateBet,
+  grade,
+} from '../functions/rules.js';
+const c = { startDate: '2026-09-09' },
+  now = Date.parse('2026-09-10T15:00:00Z');
+const bet = {
+  stake: 1000,
+  odds: -110,
+  startsAt: now + 3600000,
+  selection: 'Home −3.5',
+  sportsbook: 'FanDuel',
+  market: 'Spread',
+};
+test('week one protects $170 and caps total stakes even after an early win', () => {
+  assert.deepEqual(funds(18000, 18000, 0, 1), {
+    reserve: 17000,
+    available: 1000,
+    needed: 1000,
+  });
+  assert.equal(funds(18909, 18000, 1000, 1).available, 0);
+  assert.throws(() =>
+    validateBet({ ...bet, stake: 1001 }, now, c, 18000, 18000, 0),
+  );
+});
+test('next week unlocks prior profit and next $10 allocation', () =>
+  assert.equal(funds(18909, 18909, 0, 2).available, 2909));
+test('split stakes count toward the minimum and cannot spend pending returns', () => {
+  assert.equal(funds(17400, 18000, 600, 1).available, 400);
+  assert.equal(funds(17400, 18000, 600, 1).needed, 400);
+  assert.throws(() =>
+    validateBet({ ...bet, stake: 401 }, now, c, 17400, 18000, 600),
+  );
+});
+test('American odds round payout to cents with stake included', () => {
+  assert.equal(payout(1000, -110, 'won'), 1909);
+  assert.equal(payout(1000, 150, 'won'), 2500);
+  assert.equal(payout(1000, -110, 'push'), 1000);
+  assert.equal(payout(1000, -110, 'void'), 1000);
+  assert.equal(payout(1000, -110, 'lost'), 0);
+});
+test('Tuesday 11:59 stays in previous week and Wednesday midnight advances', () => {
+  assert.equal(weekAt(Date.parse('2026-09-16T03:59:59Z'), c.startDate), 1);
+  assert.equal(weekAt(Date.parse('2026-09-16T04:00:00Z'), c.startDate), 2);
+});
+test('Eastern boundary respects the November daylight-saving change', () => {
+  assert.equal(
+    new Date(weekStart(c.startDate, 8)).toISOString(),
+    '2026-10-28T04:00:00.000Z',
+  );
+  assert.equal(
+    new Date(weekStart(c.startDate, 9)).toISOString(),
+    '2026-11-04T05:00:00.000Z',
+  );
+});
+test('invalid stakes, odds, past games, next-week games, and closed seasons rejected', () => {
+  for (const change of [
+    { stake: 0 },
+    { stake: -1 },
+    { stake: 1.5 },
+    { odds: 0 },
+    { odds: 99 },
+    { odds: 110.5 },
+    { startsAt: now },
+    { startsAt: weekStart(c.startDate, 2) },
+  ])
+    assert.throws(() =>
+      validateBet({ ...bet, ...change }, now, c, 18000, 18000, 0),
+    );
+  assert.throws(() =>
+    validateBet(bet, weekStart(c.startDate, 19), c, 18000, 18000, 0),
+  );
+});
+test('result corrections use the payout difference, never award twice', () => {
+  const paid = payout(1000, -110, 'won');
+  assert.equal(payout(1000, -110, 'lost') - paid, -1909);
+  assert.equal(payout(1000, -110, 'won') - paid, 0);
+});
+const event = {
+  completed: true,
+  home_team: 'Home',
+  away_team: 'Away',
+  scores: [
+    { name: 'Home', score: '24' },
+    { name: 'Away', score: '21' },
+  ],
+};
+test('full-game automatic settlement grades home/away spread and total pushes', () => {
+  assert.equal(
+    grade({ market: 'Spread', side: 'home', line: -3 }, event),
+    'push',
+  );
+  assert.equal(
+    grade({ market: 'Spread', side: 'away', line: 3.5 }, event),
+    'won',
+  );
+  assert.equal(
+    grade({ market: 'Total', side: 'over', line: 45.5 }, event),
+    'lost',
+  );
+  assert.equal(grade({ market: 'Moneyline', side: 'home' }, event), 'won');
+});
+test('incomplete games, missing scores and unsupported props require review', () => {
+  assert.equal(grade({ market: 'Player prop' }, event), null);
+  assert.equal(
+    grade(
+      { market: 'Moneyline', side: 'home' },
+      { ...event, completed: false },
+    ),
+    null,
+  );
+  assert.equal(
+    grade({ market: 'Moneyline', side: 'home' }, { ...event, scores: [] }),
+    null,
+  );
+});
+test('commissioner correction below reserve freezes new spending', () =>
+  assert.equal(funds(15000, 18000, 0, 1).available, 0));
