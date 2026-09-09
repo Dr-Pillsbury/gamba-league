@@ -1,3 +1,4 @@
+import { readWeeklyStakes, weeklyStakePatch } from './weekly-summary.js';
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
@@ -16,7 +17,6 @@ import {
 import {
   INITIAL,
   weekAt,
-  weekStart,
   weekEnd,
   lateJoinBankroll,
   minimumShortfall,
@@ -99,6 +99,8 @@ export const joinLeague = clean(async (req) => {
     tx.create(member, {
       username: name,
       balance: INITIAL,
+      weeklyStakesVersion: 1,
+      weeklyStakes: {},
       joinedAt: Date.now(),
     });
   });
@@ -145,6 +147,8 @@ export const reviewJoinRequest = clean(async (req) => {
       tx.create(member, {
         username: data.username,
         balance: allocation,
+        weeklyStakesVersion: 1,
+        weeklyStakes: {},
         joinedAt: at,
         startingBankroll: allocation,
         approvedBy: actor,
@@ -182,6 +186,11 @@ export const reviewJoinRequest = clean(async (req) => {
 export const placeBet = clean(async (req) => {
   const id = uid(req),
     c = await config();
+  if (c.backendEnabled !== true)
+    throw new HttpsError(
+      'failed-precondition',
+      'Betting is paused by the commissioner.',
+    );
   const input = req.data ?? {};
   if (
     typeof input.requestId !== 'string' ||
@@ -191,31 +200,16 @@ export const placeBet = clean(async (req) => {
   const ref = db.doc('bets/' + id + '_' + input.requestId);
   await db.runTransaction(async (tx) => {
     const now = Date.now();
-    const [existing, m, ls, bs, removed] = await Promise.all([
+    const [existing, m, removed] = await Promise.all([
       tx.get(ref),
       tx.get(db.doc('members/' + id)),
-      tx.get(db.collection('ledger').where('uid', '==', id)),
-      tx.get(db.collection('bets').where('uid', '==', id)),
       tx.get(db.doc('deletedBets/' + ref.id)),
     ]);
     if (existing.exists || removed.exists) return;
     if (!m.exists) throw Error('Join the league first.');
-    const week = weekAt(now, c.startDate),
-      start = weekStart(c.startDate, week);
-    const opening =
-      INITIAL +
-      ls.docs.reduce(
-        (n, d) => n + (d.data().at < start ? d.data().delta : 0),
-        0,
-      );
-    const staked = bs.docs.reduce(
-      (n, d) =>
-        n +
-        (d.data().week === week && d.data().status !== 'void'
-          ? d.data().stake
-          : 0),
-      0,
-    );
+    const week = weekAt(now, c.startDate);
+    const weeklyStakes = await readWeeklyStakes(db, tx, m);
+    const staked = weeklyStakes[week] ?? 0;
     let event = null;
     if (input.eventId && input.market !== 'Parlay') {
       if (
@@ -362,7 +356,7 @@ export const placeBet = clean(async (req) => {
       bet.line = null;
       bet.selection = `${bet.legs.length}-leg parlay`;
     }
-    validateBet(bet, now, c, m.data().balance, opening, staked);
+    validateBet(bet, now, c, m.data().balance, 0, staked);
     tx.create(ref, {
       ...bet,
       uid: id,
@@ -379,7 +373,10 @@ export const placeBet = clean(async (req) => {
             !!bet.propKey)),
       manualOverride: false,
     });
-    tx.update(m.ref, { balance: m.data().balance - bet.stake });
+    tx.update(m.ref, {
+      balance: m.data().balance - bet.stake,
+      ...weeklyStakePatch(weeklyStakes, week, bet.stake),
+    });
     tx.create(db.collection('ledger').doc(), {
       uid: id,
       betId: ref.id,
@@ -450,6 +447,7 @@ async function settle(
       throw Error('Wait until the event has started.');
     const m = await tx.get(db.doc('members/' + bet.uid));
     if (!m.exists) throw Error('Player not found.');
+    const weeklyStakes = await readWeeklyStakes(db, tx, m);
     const settlementOdds = parlaySettlementOdds(bet, adjustedOdds);
     if (
       bet.status === result &&
@@ -460,7 +458,15 @@ async function settle(
     const paid = payout(bet.stake, settlementOdds, result),
       delta = paid - bet.paid,
       at = Date.now();
-    tx.update(m.ref, { balance: m.data().balance + delta });
+    tx.update(m.ref, {
+      balance: m.data().balance + delta,
+      ...weeklyStakePatch(
+        weeklyStakes,
+        bet.week,
+        (result === 'void' ? -bet.stake : 0) +
+          (bet.status === 'void' ? bet.stake : 0),
+      ),
+    });
     tx.update(ref, {
       status: result,
       paid,
@@ -709,81 +715,94 @@ export const syncFootballScores = onSchedule(
   async () => {
     const c = await config();
     if (!c.dataSyncEnabled) return;
-    const store = {
-      get: async (path) => (await db.doc(path).get()).data() ?? null,
-      set: async (path, value) => {
-        await db.doc(path).set(value);
-      },
-      update: (path, fn) =>
-        db.runTransaction(async (tx) => {
-          const ref = db.doc(path),
-            current = await tx.get(ref);
-          tx.set(ref, fn(current.data() ?? null));
-        }),
-    };
-    const pending = await db
-      .collection('bets')
-      .where('status', '==', 'pending')
-      .get();
-    await runNflImport({
-      store,
-      season: Number(c.startDate.slice(0, 4)),
-      pendingBets: pending.docs.map((d) => d.data()),
-    });
-    if (!c.autoSettlementEnabled) return;
-    for (const doc of pending.docs) {
-      const b = doc.data();
-      if (
-        b.market === 'Parlay' &&
-        Array.isArray(b.legs) &&
-        b.autoEligible &&
-        !b.manualOverride
-      ) {
-        await settle(
-          doc.id,
-          null,
-          'nflverse',
-          'Parlay legs checked against final scores, player statistics and verified Other results.',
-          true,
-        );
-        continue;
-      }
-      if (
-        !b.autoEligible ||
-        b.manualOverride ||
-        !b.eventId ||
-        b.gradingRule !== 'full-game'
-      )
-        continue;
-      const event = await store.get('events/' + b.eventId);
-      if (!event?.completed) continue;
-      const stats =
-        b.market === 'Player prop'
-          ? await store.get('gameStats/' + b.eventId)
-          : null;
-      const result =
-        b.market === 'Player prop'
-          ? gradeProp(b, event, stats)
-          : grade(b, event);
-      if (result)
-        await settle(
-          doc.id,
-          result,
-          'nflverse',
-          'nflverse next-day final ' +
-            (b.market === 'Player prop' ? 'player statistic' : 'score') +
-            ' · full game including overtime',
-          true,
-        );
-      else
-        await db.runTransaction(async (tx) => {
-          const current = await tx.get(doc.ref);
-          if (!current.exists || current.data().status !== 'pending') return;
-          tx.update(doc.ref, {
-            reviewReason:
-              'Required statistics or participation evidence are missing. Commissioner review under FanDuel Connecticut rules is needed.',
+    try {
+      const store = {
+        get: async (path) => (await db.doc(path).get()).data() ?? null,
+        set: async (path, value) => {
+          await db.doc(path).set(value);
+        },
+        update: (path, fn) =>
+          db.runTransaction(async (tx) => {
+            const ref = db.doc(path),
+              current = await tx.get(ref);
+            tx.set(ref, fn(current.data() ?? null));
+          }),
+      };
+      const pending = await db
+        .collection('bets')
+        .where('status', '==', 'pending')
+        .get();
+      await runNflImport({
+        store,
+        season: Number(c.startDate.slice(0, 4)),
+        pendingBets: pending.docs.map((d) => d.data()),
+      });
+      if (!c.autoSettlementEnabled) return;
+      for (const doc of pending.docs) {
+        const b = doc.data();
+        if (
+          b.market === 'Parlay' &&
+          Array.isArray(b.legs) &&
+          b.autoEligible &&
+          !b.manualOverride
+        ) {
+          await settle(
+            doc.id,
+            null,
+            'nflverse',
+            'Parlay legs checked against final scores, player statistics and verified Other results.',
+            true,
+          );
+          continue;
+        }
+        if (
+          !b.autoEligible ||
+          b.manualOverride ||
+          !b.eventId ||
+          b.gradingRule !== 'full-game'
+        )
+          continue;
+        const event = await store.get('events/' + b.eventId);
+        if (!event?.completed) continue;
+        const stats =
+          b.market === 'Player prop'
+            ? await store.get('gameStats/' + b.eventId)
+            : null;
+        const result =
+          b.market === 'Player prop'
+            ? gradeProp(b, event, stats)
+            : grade(b, event);
+        if (result)
+          await settle(
+            doc.id,
+            result,
+            'nflverse',
+            'nflverse next-day final ' +
+              (b.market === 'Player prop' ? 'player statistic' : 'score') +
+              ' · full game including overtime',
+            true,
+          );
+        else
+          await db.runTransaction(async (tx) => {
+            const current = await tx.get(doc.ref);
+            if (!current.exists || current.data().status !== 'pending') return;
+            tx.update(doc.ref, {
+              pendingState: 'stats',
+              reviewReason:
+                'Required statistics or participation evidence are missing. Commissioner review under FanDuel Connecticut rules is needed.',
+            });
           });
-        });
+      }
+      await configRef.update({
+        lastSettlementAt: Date.now(),
+        settlementError: '',
+      });
+    } catch (error) {
+      await configRef.update({
+        settlementError: error.message,
+        lastSettlementFailedAt: Date.now(),
+      });
+      throw error;
     }
   },
 );

@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {
   normalizeGame,
   normalizePlayerStats,
-  normalizeRoster,
   gradeProp,
   propsForPosition,
   numericStat,
@@ -54,13 +53,13 @@ const statsRows = [
     ],
   },
 ];
-test('NFL game normalization keeps stable provider IDs and final scores', () => {
+void test('NFL game normalization keeps stable provider IDs and final scores', () => {
   const g = normalizeGame(gameRow);
   assert.equal(g.id, 'nfl_1');
   assert.equal(g.completed, true);
   assert.equal(grade({ market: 'Spread', side: 'home', line: -3 }, g), 'push');
 });
-test('null final scores, postponed and canceled games do not auto-grade', () => {
+void test('null final scores, postponed and canceled games do not auto-grade', () => {
   for (const status of ['PST', 'CANC', 'NS', 'Q4'])
     assert.equal(
       normalizeGame({
@@ -79,18 +78,18 @@ test('null final scores, postponed and canceled games do not auto-grade', () => 
     null,
   );
 });
-test('zero is a real stat; null, blank and malformed values are missing', () => {
+void test('zero is a real stat; null, blank and malformed values are missing', () => {
   for (const value of [null, undefined, '', ' ', '-', '1/2', '9 yards'])
     assert.equal(numericStat(value), null);
   assert.equal(numericStat('0'), 0);
   assert.equal(numericStat('0.5'), 0.5);
 });
-test('props match position and separate passing TDs from scoring TDs', () => {
+void test('props match position and separate passing TDs from scoring TDs', () => {
   assert.ok(propsForPosition('QB').some((p) => p.key === 'passing_tds'));
   assert.ok(!propsForPosition('WR').some((p) => p.key === 'passing_tds'));
   assert.ok(propsForPosition('LB').some((p) => p.key === 'total_tackles'));
 });
-test('player prop win/loss/push uses the chosen exact stat and side', () => {
+void test('player prop win/loss/push uses the chosen exact stat and side', () => {
   const event = normalizeGame(gameRow),
     stats = { players: normalizePlayerStats(statsRows) },
     base = {
@@ -113,7 +112,7 @@ test('player prop win/loss/push uses the chosen exact stat and side', () => {
     'won',
   );
 });
-test('missing players and unknown stats never grade as zero; custom rules require review', () => {
+void test('missing players and unknown stats never grade as zero; custom rules require review', () => {
   const event = normalizeGame(gameRow),
     stats = { players: normalizePlayerStats(statsRows) },
     b = {
@@ -135,7 +134,7 @@ test('missing players and unknown stats never grade as zero; custom rules requir
     null,
   );
 });
-test('solo and total tackles stay distinct, and fractional sacks are retained', () => {
+void test('solo and total tackles stay distinct, and fractional sacks are retained', () => {
   const p = normalizePlayerStats(statsRows)['9'];
   assert.equal(p.values.total_tackles, 9);
   assert.equal(p.values.solo_tackles, 6);

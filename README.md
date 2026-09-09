@@ -1,5 +1,48 @@
 # Gamba League
 
+## Local development and improvements
+
+Development builds now use **only `demo-gamba-league` Firebase emulators**. Production builds retain the live Firebase configuration. The local banner provides disposable commissioner/player sign-in; no real Google account is required. Emulator-only identity code is removed from production builds.
+
+Run each long-lived service in its own terminal:
+
+```powershell
+npm run emulators
+# Wait for "All emulators ready", then in another terminal:
+npm run test:integration
+npm run seed:local
+npm run dev
+```
+
+Open the Local URL printed by the development server and select **Demo commissioner** or **Demo player**. `seed:local` replaces only the disposable emulator database with sample players, 42 picks, games, rosters and weekly history. Integration tests also reset that demo database; run them before seeding a preview. Both scripts hardcode the demo project and loopback endpoints. Nothing here publishes the site, deploys rules/functions, or changes live records.
+
+The Firestore emulator needs Java 21 or later. `start-emulators.mjs` uses a portable runtime in ignored `work/java/` when present, otherwise Java from the environment. Emulator downloads and CLI settings also stay under ignored `work/`. The installed Node runtime should match the Functions Node 22 engine when reproducing production behavior.
+
+Validation commands:
+
+```powershell
+npm test
+npm run test:integration
+node node_modules/typescript/bin/tsc --noEmit
+npm run build
+```
+
+The integration suite calls actual emulated HTTPS functions and Firestore rules. It covers concurrent overspending, retries, deletion/settlement races, void/correction accounting, review resolution, legacy summary initialization, username collisions and denied access. Placement tests must run during the normal Tuesday 10 a.m.–Monday-night betting window. The emulator does not reproduce production index enforcement or deployed scheduler delivery.
+
+Improvements in this version:
+
+- Bet feed queries load 30 picks initially, with explicit load-more and server-side week/owner/status filters. Commissioner history loads only on the commissioner tab, with older bets available on demand; the active pending/review queues remain complete.
+- Schedule queries cover the active league week. Rosters load only for the selected prop games. My season loads only that player's ledger and bets when opened; at most 18 snapshots are subscribed.
+- Members carry transactional `weeklyStakes` summaries. Place, delete, void and correction transactions update them with the wallet. Existing accounts initialize once from their bets on the first mutation. Until all members have summaries, the UI falls back to current-week bets. The append-only ledger remains authoritative for historical snapshots and reconciliation. Bet placement no longer scans historical ledger entries; the current rule computes available funds from balance and future-week reserve.
+- My season shows bankroll history, bankroll change, outcome counts, pending stakes and tied weekly ranks. Late-entry allocations are not shown as losses.
+- Weekly check-in combines stake progress, remaining requirement and the Eastern-time deadline. Pending picks explain what they are waiting for. Commissioner health prioritizes open reviews, manual results and picks pending more than 36 hours, alongside import/settlement failures and stale-data status.
+- Player search works in singles and parlays. Device-local drafts are scoped by account and season, restore after reload, retain retry IDs, and clear after successful submission. Drafts are never submitted automatically.
+- Feed, slip, picker, weekly checklist, season dashboard and commissioner tools are separate components. The season chart, commissioner tools and parlay builder load lazily.
+
+For live rollouts, deploy composite indexes and Functions changes before the frontend, wait for indexes to become ready, and verify demo identity code is absent from the production client.
+
+Release validation on September 9, 2026: 51 unit tests, 6 emulator integration tests, TypeScript and the production build passed. The owner approved publishing with 71 remaining lint findings (React effects/dependencies, loose types, accessibility checks and CommonJS imports) and build warnings about large chunks and JSON import attributes. These remain follow-up work; passing tests do not imply that every interaction is covered.
+
 A single-season football picks league. Google authentication and Cloud Firestore hold shared league data; Firebase callable functions are the only writers for balances, bets, usernames, and result history. The React/Vinext frontend can be hosted on Sites.
 
 ## Current setup

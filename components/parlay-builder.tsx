@@ -1,34 +1,12 @@
 'use client';
+import { PlayerPicker } from '@/components/player-picker';
 import { Minus, Plus } from 'lucide-react';
 import { propsForPosition } from '@/functions/football.js';
 import { MAX_LEGS, PARLAY_MARKETS } from '@/functions/parlay.js';
 import { Button } from '@/components/ui/button';
 
 type Data = { id: string; [key: string]: any };
-export type ParlayDraft = {
-  id: string;
-  eventId: string;
-  market: string;
-  side: string;
-  line: string;
-  playerId: string;
-  propKey: string;
-  selection: string;
-  startsAt: string;
-};
-export function newParlayLeg(eventId: string): ParlayDraft {
-  return {
-    id: crypto.randomUUID(),
-    eventId,
-    market: 'Moneyline',
-    side: 'home',
-    line: '',
-    playerId: '',
-    propKey: '',
-    selection: '',
-    startsAt: '',
-  };
-}
+import { newParlayLeg, type ParlayDraft } from '@/lib/parlay-draft';
 export function ParlayBuilder({
   legs,
   onChange,
@@ -164,24 +142,17 @@ export function ParlayBuilder({
                   <>
                     <label>
                       Player
-                      <select
-                        className="picker"
-                        required
+                      <PlayerPicker
+                        label={`Leg ${index + 1} player`}
                         value={leg.playerId}
-                        onChange={(e) =>
-                          update(leg.id, {
-                            playerId: e.target.value,
-                            propKey: '',
-                          })
+                        onChange={(value) =>
+                          update(leg.id, { playerId: value, propKey: '' })
                         }
-                      >
-                        <option value="">Choose a player</option>
-                        {players.map((p) => (
-                          <option value={p.id} key={p.id}>
-                            {p.name} · {p.position} · {p.teamId}
-                          </option>
-                        ))}
-                      </select>
+                        items={players.map((p) => ({
+                          value: p.id,
+                          label: p.name + ' · ' + p.position + ' · ' + p.teamId,
+                        }))}
+                      />
                     </label>
                     <label>
                       Player statistic

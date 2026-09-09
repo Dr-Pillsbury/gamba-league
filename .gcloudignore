@@ -1,0 +1,10 @@
+.gcloudignore
+.git
+.gitignore
+#!include:.gitignore
+.env*
+work/
+outputs/
+.codex/
+.agents/
+tests/

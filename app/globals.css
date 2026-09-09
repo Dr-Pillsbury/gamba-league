@@ -788,3 +788,24 @@ textarea {
 .slip .notice.error {
   margin: 0 0 14px;
 }
+.season-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 24px 0 12px; }
+.season-metrics > div { padding: 16px; border: 1px solid var(--border); border-radius: 8px; }
+.season-metrics span { display: block; font-size: .875rem; color: var(--muted-foreground); }
+.season-metrics strong { display: block; font-size: 1.5rem; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.season-panel h3, .health-panel h3 { margin-top: 24px; font-size: 1.125rem; font-weight: 600; }
+.season-table { width: 100%; text-align: left; border-collapse: collapse; }
+.season-table td, .season-table th { border-bottom: 1px solid var(--border); }
+.history-scroll { max-height: 300px; overflow: auto; }
+.bankroll-chart { width: 100%; min-width: 0; margin: 12px 0; }
+.season-panel summary { cursor: pointer; padding: 12px 0; color: var(--primary); }
+.health-panel { border-bottom: 1px solid var(--border); padding-bottom: 24px; margin-bottom: 24px; }
+.health-panel .notice { margin-top: 12px; }
+.pending-explanation { margin: 12px 0; padding: 12px; border-left: 2px solid #e7c371; background: #e7c3710a; color: #e7d5a6; font-size: .875rem; line-height: 1.6; }
+.draft-status { display: flex; align-items: center; gap: 8px; }
+.draft-status p { flex: 1; }
+.player-search { width: 100%; min-height: 44px; background: #0b1314; }
+.player-search input { width: 100%; min-width: 0; }
+.local-preview { border-radius: 0; margin: 0; justify-content: center; font-size: .875rem; }
+.local-preview { flex-wrap: wrap; }
+.local-preview button { font-size: .875rem; margin-left: 0; }
+@media (max-width: 600px) { .season-metrics { grid-template-columns: 1fr; } .draft-status { flex-wrap: wrap; } .bet-money { flex-wrap: wrap; } }

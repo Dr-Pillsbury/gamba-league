@@ -1,27 +1,40 @@
 'use client';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { BetSlip } from '@/components/bet-slip';
+import { BetFeed } from '@/components/bet-feed';
+import { Picker } from '@/components/league-picker';
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useState,
+  type SyntheticEvent,
+} from 'react';
+import { useLeagueData } from '@/hooks/use-league-data';
+import { useBetDraft } from '@/hooks/use-bet-draft';
+import { money, date } from '@/lib/league-format';
+import { WeeklyChecklist } from '@/components/weekly-checklist';
+const CommissionerPanel = lazy(() => import('@/components/commissioner-panel'));
+const MySeason = lazy(() => import('@/components/my-season'));
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
-import { collection, doc, onSnapshot } from 'firebase/firestore';
 import {
   Trophy,
   ArrowUpRight,
   ShieldCheck,
-  Ticket,
-  Activity,
   LogOut,
   Check,
   Clock,
   CircleAlert,
   LoaderCircle,
 } from 'lucide-react';
-import { auth, db, call, login } from '@/lib/firebase';
 import {
-  ParlayBuilder,
-  newParlayLeg,
-  type ParlayDraft,
-} from '@/components/parlay-builder';
+  auth,
+  call,
+  login,
+  loginLocal,
+  isLocalDevelopment,
+} from '@/lib/firebase';
+import type { ParlayDraft } from '@/lib/parlay-draft';
 import { propsForPosition } from '@/functions/football.js';
-import { LEAGUE_RULES } from '@/functions/reviews.js';
 import {
   funds,
   INITIAL,
@@ -35,13 +48,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from '@/components/ui/select';
-import {
   Table,
   TableHeader,
   TableBody,
@@ -49,30 +55,7 @@ import {
   TableHead,
   TableCell,
 } from '@/components/ui/table';
-import { Progress } from '@/components/ui/progress';
 
-type RecordData = { id: string; [key: string]: any };
-const money = (n: number) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
-    n / 100,
-  );
-const date = (n: number) =>
-  new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZoneName: 'short',
-  }).format(new Date(n));
-const markets = [
-  'Moneyline',
-  'Spread',
-  'Total',
-  'Player prop',
-  'Parlay',
-  'Other',
-];
 function BalanceLoading({ failed = false }: { failed?: boolean }) {
   return (
     <span className="balance-loading" role="status">
@@ -81,52 +64,28 @@ function BalanceLoading({ failed = false }: { failed?: boolean }) {
     </span>
   );
 }
-function Picker({
-  value,
-  onChange,
-  items,
-  label,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  items: { value: string; label: string }[];
-  label: string;
-}) {
+export default function Home() {
+  const [user, setUser] = useState<User | null>(null),
+    [authReady, setAuthReady] = useState(false);
+  useEffect(
+    () =>
+      onAuthStateChanged(auth, (u) => {
+        setUser(u);
+        setAuthReady(true);
+      }),
+    [],
+  );
   return (
-    <Select value={value} onValueChange={(v) => v !== null && onChange(v)}>
-      <SelectTrigger aria-label={label} className="picker">
-        <SelectValue>
-          {items.find((i) => i.value === value)?.label ?? value}
-        </SelectValue>
-      </SelectTrigger>
-      <SelectContent>
-        {items.map((i) => (
-          <SelectItem key={i.value} value={i.value}>
-            {i.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <League key={user?.uid ?? 'signed-out'} user={user} authReady={authReady} />
   );
 }
-export default function Home() {
-  const [balanceSources, setBalanceSources] = useState<Record<string, string>>(
-    {},
-  );
-  const [balanceLoadFailed, setBalanceLoadFailed] = useState(false);
-  const [user, setUser] = useState<User | null>(null),
-    [authReady, setAuthReady] = useState(false),
-    [config, setConfig] = useState<RecordData | null>(null),
-    [members, setMembers] = useState<RecordData[]>([]),
-    [bets, setBets] = useState<RecordData[]>([]),
-    [ledger, setLedger] = useState<RecordData[]>([]),
-    [snapshots, setSnapshots] = useState<RecordData[]>([]),
-    [events, setEvents] = useState<RecordData[]>([]),
-    [rosters, setRosters] = useState<RecordData[]>([]),
-    [audit, setAudit] = useState<RecordData[]>([]);
-  const [joinRequests, setJoinRequests] = useState<RecordData[]>([]),
-    [ownJoinRequest, setOwnJoinRequest] = useState<RecordData | null>(null),
-    [joinBudgets, setJoinBudgets] = useState<Record<string, string>>({});
+function League({
+  user,
+  authReady,
+}: {
+  user: User | null;
+  authReady: boolean;
+}) {
   const [now, setNow] = useState(0),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState(''),
@@ -147,160 +106,66 @@ export default function Home() {
   const [playerId, setPlayerId] = useState(''),
     [propKey, setPropKey] = useState('');
   const [parlayLegs, setParlayLegs] = useState<ParlayDraft[]>([]);
-  const [legReasons, setLegReasons] = useState<Record<string, string>>({});
-  const [flaggingBet, setFlaggingBet] = useState(''),
-    [flagReason, setFlagReason] = useState('');
-  const [selectedBet, setSelectedBet] = useState(''),
-    [adjustedOdds, setAdjustedOdds] = useState(''),
-    [result, setResult] = useState('won'),
-    [reason, setReason] = useState('');
-  const request = useRef({ signature: '', id: '' });
-  const me = members.find((m) => m.id === user?.uid),
-    commissioner = !!user && !!config?.commissionerUids?.includes(user.uid);
+  const [request, setRequest] = useState({ signature: '', id: '' });
+  const {
+    config,
+    members,
+    me,
+    commissioner,
+    events,
+    rosters,
+    bets,
+    ledger,
+    snapshots,
+    audit,
+    joinRequests,
+    ownJoinRequest,
+    shownBets,
+    feedLoading,
+    hasMore,
+    loadMore,
+    adminHasMore,
+    loadMoreAdmin,
+    seasonBets,
+    seasonReady,
+    balancesReady,
+    dataError,
+    balanceLoadFailed,
+  } = useLeagueData(
+    user,
+    now,
+    tab,
+    viewWeek,
+    filter,
+    market === 'Parlay'
+      ? parlayLegs
+          .filter((l) => l.market === 'Player prop')
+          .map((l) => l.eventId)
+      : market === 'Player prop'
+        ? [eventId]
+        : [],
+  );
   const backendEnabled = config?.backendEnabled === true;
   useEffect(() => {
     setNow(Date.now());
     const t = setInterval(() => setNow(Date.now()), 30000);
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setBalanceSources({});
-      setBalanceLoadFailed(false);
-      setUser(u);
-      setAuthReady(true);
-      setError('');
-    });
-    return () => {
-      clearInterval(t);
-      unsub();
-    };
+    return () => clearInterval(t);
   }, []);
-  useEffect(() => {
-    setConfig(null);
-    setMembers([]);
-    setEvents([]);
-    setRosters([]);
-    if (!user) return;
-    const fail = (e: Error) =>
-      setError(
-        'League data is unavailable. The commissioner needs to deploy Firestore rules and configure the league. ' +
-          e.message,
-      );
-    const balanceFail = (e: Error) => {
-      setBalanceLoadFailed(true);
-      fail(e);
-    };
-    const stops = [
-      onSnapshot(
-        doc(db, 'config', 'league'),
-        { includeMetadataChanges: true },
-        (s) => {
-          setConfig(s.exists() ? { id: s.id, ...s.data() } : null);
-          if (!s.metadata.fromCache)
-            setBalanceSources((v) => ({ ...v, config: user.uid }));
-        },
-        balanceFail,
-      ),
-      onSnapshot(
-        collection(db, 'members'),
-        { includeMetadataChanges: true },
-        (s) => {
-          setMembers(s.docs.map((d) => ({ id: d.id, ...d.data() })));
-          if (!s.metadata.fromCache)
-            setBalanceSources((v) => ({ ...v, members: user.uid }));
-        },
-        balanceFail,
-      ),
-      onSnapshot(
-        collection(db, 'events'),
-        (s) => setEvents(s.docs.map((d) => ({ id: d.id, ...d.data() }))),
-        fail,
-      ),
-      onSnapshot(
-        collection(db, 'rosters'),
-        (s) => setRosters(s.docs.map((d) => ({ id: d.id, ...d.data() }))),
-        fail,
-      ),
-    ];
-    return () => stops.forEach((s) => s());
-  }, [user]);
-  useEffect(() => {
-    setBets([]);
-    setLedger([]);
-    setBalanceSources((v) => ({ ...v, bets: '', ledger: '' }));
-    setSnapshots([]);
-    setAudit([]);
-    if (!user || (!me?.id && !commissioner)) return;
-    const fail = (e: Error) =>
-      setError('Unable to load league activity. ' + e.message);
-    const stops = [
-      ['bets', setBets],
-      ['ledger', setLedger],
-      ['snapshots', setSnapshots],
-      ['audit', setAudit],
-    ].map(([name, set]) =>
-      onSnapshot(
-        collection(db, name as string),
-        { includeMetadataChanges: true },
-        (s) => {
-          (set as (r: RecordData[]) => void)(
-            s.docs.map((d) => ({ id: d.id, ...d.data() })),
-          );
-          if (!s.metadata.fromCache)
-            setBalanceSources((v) => ({ ...v, [name as string]: user.uid }));
-        },
-        (e) => {
-          if (name === 'bets' || name === 'ledger') setBalanceLoadFailed(true);
-          fail(e);
-        },
-      ),
-    );
-    return () => stops.forEach((s) => s());
-  }, [me?.id, commissioner, user]);
-  useEffect(() => {
-    setJoinRequests([]);
-    setOwnJoinRequest(null);
-    if (!user) return;
-    const fail = (e: Error) => setError(e.message);
-    const stops = [
-      onSnapshot(
-        doc(db, 'joinRequests', user.uid),
-        (d) => setOwnJoinRequest(d.exists() ? { id: d.id, ...d.data() } : null),
-        fail,
-      ),
-    ];
-    if (commissioner)
-      stops.push(
-        onSnapshot(
-          collection(db, 'joinRequests'),
-          (s) =>
-            setJoinRequests(s.docs.map((d) => ({ id: d.id, ...d.data() }))),
-          fail,
-        ),
-      );
-    return () => stops.forEach((stop) => stop());
-  }, [user, commissioner]);
   const start = config?.startDate ?? '2026-09-08',
     actualWeek = now ? weekAt(now, start) : 0,
     week = Math.max(1, Math.min(18, actualWeek)),
     inSeason = !!config && bettingOpen(now, start);
-  const balancesReady =
-    authReady &&
-    (!user ||
-      ['config', 'members', ...(me ? ['bets', 'ledger'] : [])].every(
-        (source) => balanceSources[source] === user.uid,
-      ));
-  const showBalanceLoading = !balancesReady || balanceLoadFailed;
+  const showBalanceLoading = !authReady || !balancesReady || balanceLoadFailed;
   const balancePlaceholder = <BalanceLoading failed={balanceLoadFailed} />;
   const myBets = bets.filter((b) => b.uid === user?.uid),
-    staked = myBets
-      .filter((b) => b.week === week && b.status !== 'void')
-      .reduce((n, b) => n + b.stake, 0),
-    opening =
-      INITIAL +
-      ledger
-        .filter((l) => l.uid === user?.uid && l.at < weekStart(start, week))
-        .reduce((n, l) => n + l.delta, 0),
+    staked =
+      me?.weeklyStakesVersion === 1
+        ? (me.weeklyStakes?.[week] ?? 0)
+        : myBets
+            .filter((b) => b.week === week && b.status !== 'void')
+            .reduce((n, b) => n + b.stake, 0),
     balance = me?.balance ?? INITIAL,
-    { available, reserve, needed } = funds(balance, opening, staked, week);
+    { available, reserve } = funds(balance, 0, staked, week);
   const bettableEvents = events
     .filter(
       (e) =>
@@ -346,21 +211,69 @@ export default function Home() {
           .map((m) => ({
             ...m,
             uid: m.id,
-            staked: bets
-              .filter(
-                (b) => b.uid === m.id && b.week === week && b.status !== 'void',
-              )
-              .reduce((n, b) => n + b.stake, 0),
+            staked:
+              m.weeklyStakesVersion === 1
+                ? (m.weeklyStakes?.[week] ?? 0)
+                : bets
+                    .filter(
+                      (b) =>
+                        b.uid === m.id &&
+                        b.week === week &&
+                        b.status !== 'void',
+                    )
+                    .reduce((n, b) => n + b.stake, 0),
           }))
       : (snapshots.find((s) => s.id === viewWeek)?.rows ?? []);
-  const shownBets = bets
-    .filter(
-      (b) =>
-        (viewWeek === 'live' || b.week === Number(viewWeek)) &&
-        (filter === 'all' ||
-          (filter === 'mine' ? b.uid === user?.uid : b.status === filter)),
-    )
-    .sort((a, b) => b.createdAt - a.createdAt);
+  const draft = {
+    selection,
+    market,
+    odds,
+    stake,
+    startsAt,
+    eventId,
+    side,
+    line,
+    playerId,
+    propKey,
+    parlayLegs,
+    request: request,
+  };
+  const resetDraft = () => {
+    setSelection('');
+    setMarket('Moneyline');
+    setOdds('');
+    setStake('');
+    setStartsAt('');
+    setEventId('');
+    setSide('home');
+    setLine('');
+    setPlayerId('');
+    setPropKey('');
+    setParlayLegs([]);
+    setRequest({ signature: '', id: '' });
+  };
+  const { draftNotice, persistDraft, clearDraft } = useBetDraft(
+    user && config ? 'gamba-draft:' + start + ':' + user.uid : null,
+    draft,
+    (d) => {
+      setSelection(d.selection);
+      setMarket(d.market);
+      setOdds(d.odds);
+      setStake(d.stake);
+      setStartsAt(d.startsAt);
+      setEventId(d.eventId);
+      setSide(d.side);
+      setLine(d.line);
+      setPlayerId(d.playerId);
+      setPropKey(d.propKey);
+      setParlayLegs(d.parlayLegs);
+      if (
+        typeof d.request?.signature === 'string' &&
+        /^[a-f0-9-]{36}$/.test(d.request?.id)
+      )
+        setRequest(d.request);
+    },
+  );
   async function action(fn: () => Promise<unknown>, success = '') {
     setBusy(true);
     setError('');
@@ -368,14 +281,15 @@ export default function Home() {
     try {
       await fn();
       setMessage(success);
-    } catch (e: any) {
-      let msg = e.message ?? 'Something went wrong.';
-      if (e.code === 'auth/unauthorized-domain')
+    } catch (e: unknown) {
+      let msg = e instanceof Error ? e.message : 'Something went wrong.';
+      const code = e && typeof e === 'object' && 'code' in e ? e.code : '';
+      if (code === 'auth/unauthorized-domain')
         msg =
           'This site address must be added in Firebase Authentication → Settings → Authorized domains.';
-      if (e.code === 'auth/operation-not-allowed')
+      if (code === 'auth/operation-not-allowed')
         msg = 'Enable Google in Firebase Authentication → Sign-in method.';
-      if (e.code === 'functions/not-found' || e.code === 'functions/internal')
+      if (code === 'functions/not-found' || code === 'functions/internal')
         msg =
           'League server functions are not available yet. Complete the Firebase setup before placing bets.';
       setError(msg);
@@ -383,7 +297,7 @@ export default function Home() {
       setBusy(false);
     }
   }
-  async function submit(e: FormEvent) {
+  async function submit(e: SyntheticEvent) {
     e.preventDefault();
     if (!user) {
       await action(login);
@@ -497,15 +411,21 @@ export default function Home() {
       return;
     }
     const signature = JSON.stringify(payload);
-    if (request.current.signature !== signature)
-      request.current = { signature, id: crypto.randomUUID() };
+    const submission =
+      request.signature === signature
+        ? request
+        : { signature, id: crypto.randomUUID() };
+    setRequest(submission);
+    persistDraft({ ...draft, request: submission });
     await action(async () => {
-      await call('placeBet', { ...payload, requestId: request.current.id });
-      request.current = { signature: '', id: '' };
+      await call('placeBet', { ...payload, requestId: submission.id });
+      setRequest({ signature: '', id: '' });
       setSelection('');
       setParlayLegs([]);
       setOdds('');
       setStake('');
+      resetDraft();
+      clearDraft();
     }, 'Bet placed. Everyone in the league can now see your pick.');
   }
   useEffect(() => {
@@ -542,7 +462,7 @@ export default function Home() {
   }, []);
   const weekOptions = [
     { value: 'live', label: 'Live standings' },
-    ...snapshots
+    ...[...snapshots]
       .sort((a, b) => b.week - a.week)
       .map((s) => ({
         value: s.id,
@@ -551,6 +471,28 @@ export default function Home() {
   ];
   return (
     <main className="league">
+      {isLocalDevelopment && (
+        <div className="notice local-preview">
+          <span>
+            Local test league · demo accounts and play money · live data is
+            isolated
+          </span>
+          <Button
+            disabled={busy}
+            variant="outline"
+            onClick={() => action(() => loginLocal('commissioner'))}
+          >
+            Demo commissioner
+          </Button>
+          <Button
+            disabled={busy}
+            variant="outline"
+            onClick={() => action(() => loginLocal('player'))}
+          >
+            Demo player
+          </Button>
+        </div>
+      )}
       <header>
         <a className="brand" href="/">
           G<span>/</span>L <small>GAMBA LEAGUE</small>
@@ -604,10 +546,10 @@ export default function Home() {
           </div>
         )}
       </div>
-      {error && (
+      {(error || dataError) && (
         <div role="alert" className="notice error">
           <CircleAlert size={20} />
-          <span>{error}</span>
+          <span>{error || dataError}</span>
           <button aria-label="Dismiss error" onClick={() => setError('')}>
             ×
           </button>
@@ -640,7 +582,7 @@ export default function Home() {
           className="join"
           onSubmit={(e) => {
             e.preventDefault();
-            action(
+            void action(
               () => call('joinLeague', { username }),
               now >= weekEnd(start, 1)
                 ? 'Late-entry request sent to the commissioner.'
@@ -736,12 +678,32 @@ export default function Home() {
             <TabsList variant="line" className="league-tabs">
               <TabsTrigger value="board">Standings</TabsTrigger>
               <TabsTrigger value="bets">Bet feed</TabsTrigger>
+              <TabsTrigger value="season">My season</TabsTrigger>
               <TabsTrigger value="schedule">Games & players</TabsTrigger>
               <TabsTrigger value="rules">League rules</TabsTrigger>
               {commissioner && (
                 <TabsTrigger value="commissioner">Commissioner</TabsTrigger>
               )}
             </TabsList>
+            <TabsContent value="season">
+              {tab === 'season' && (
+                <Suspense
+                  fallback={
+                    <section className="panel" role="status">
+                      Loading your season…
+                    </section>
+                  }
+                >
+                  <MySeason
+                    member={me}
+                    bets={seasonBets}
+                    ledger={ledger}
+                    snapshots={snapshots}
+                    ready={seasonReady}
+                  />
+                </Suspense>
+              )}
+            </TabsContent>
             <TabsContent value="schedule">
               <section className="panel">
                 <div className="panel-title">
@@ -889,230 +851,33 @@ export default function Home() {
                   </Table>
                 )}
               </section>
-              <section className="weekly">
-                <div>
-                  <span className="eyebrow">WEEK {week} CHECK-IN</span>
-                  <h2>
-                    {showBalanceLoading
-                      ? balancePlaceholder
-                      : needed === 0
-                        ? 'You’re in for the week.'
-                        : money(needed) + ' left to meet your minimum.'}
-                  </h2>
-                </div>
-                {!showBalanceLoading && (
-                  <Progress
-                    value={Math.min(100, staked / 10)}
-                    aria-label="Weekly minimum wager progress"
-                  />
-                )}
-                <p className="hint">
-                  Split the $10 minimum across as many picks as you like. A
-                  voided bet doesn’t count toward the minimum.
-                </p>
-              </section>
+              <WeeklyChecklist
+                week={week}
+                start={start}
+                now={now}
+                staked={staked}
+                ready={!showBalanceLoading}
+              />
             </TabsContent>
             <TabsContent value="bets">
-              <section className="panel">
-                <div className="panel-title">
-                  <h2>
-                    <Activity /> League activity
-                  </h2>
-                  <Picker
-                    value={filter}
-                    onChange={setFilter}
-                    label="Filter bets"
-                    items={[
-                      'all',
-                      'mine',
-                      'pending',
-                      'won',
-                      'lost',
-                      'push',
-                      'void',
-                    ].map((v) => ({
-                      value: v,
-                      label:
-                        v === 'all'
-                          ? 'All bets'
-                          : v === 'mine'
-                            ? 'My bets'
-                            : v.charAt(0).toUpperCase() + v.slice(1),
-                    }))}
-                  />
-                </div>
-                <div className="feed-week">
-                  <Picker
-                    value={viewWeek}
-                    onChange={setViewWeek}
-                    items={weekOptions.map((o) =>
-                      o.value === 'live' ? { ...o, label: 'All weeks' } : o,
-                    )}
-                    label="Bet week"
-                  />
-                </div>
-                {shownBets.length ? (
-                  shownBets.map((b) => (
-                    <article className="bet-card" key={b.id}>
-                      <div className="bet-meta">
-                        <strong>{b.username}</strong>
-                        <span>W{b.week} · FanDuel CT</span>
-                        <span className={'status ' + b.status}>{b.status}</span>
-                      </div>
-                      <h3>{b.selection}</h3>
-                      {b.legs && (
-                        <ol className="parlay-results">
-                          {b.legs.map((leg: any, i: number) => (
-                            <li key={i}>
-                              {leg.selection}{' '}
-                              <span className="tag">
-                                {leg.status === 'pending' &&
-                                leg.market === 'Other'
-                                  ? 'Needs verification'
-                                  : leg.status}
-                              </span>
-                            </li>
-                          ))}
-                        </ol>
-                      )}
-                      <p className="hint">
-                        {b.market} · {b.odds > 0 ? '+' : ''}
-                        {b.odds} · {date(b.startsAt)}
-                      </p>
-                      <div className="bet-money">
-                        <span>
-                          Stake <strong>{money(b.stake)}</strong>
-                        </span>
-                        <span>
-                          {b.status === 'pending'
-                            ? 'Potential return'
-                            : 'Returned'}{' '}
-                          <strong>
-                            {money(
-                              b.status === 'pending'
-                                ? payout(b.stake, b.odds, 'won')
-                                : b.paid,
-                            )}
-                          </strong>
-                        </span>
-                      </div>
-                      <p className="tiny">
-                        {b.manualOverride
-                          ? 'Commissioner confirmed'
-                          : b.autoEligible
-                            ? 'Automatic result eligible · full game, including overtime'
-                            : 'Commissioner review · custom market'}
-                        {b.settlementReason ? ' — ' + b.settlementReason : ''}
-                      </p>
-                      {b.review && (
-                        <p className="notice">
-                          {b.review.status === 'open'
-                            ? 'Awaiting commissioner review'
-                            : 'Review resolved'}
-                          : {b.review.reason}
-                          {b.review.resolution
-                            ? ' — ' + b.review.resolution
-                            : ''}
-                        </p>
-                      )}
-                      {b.uid === user?.uid && b.status === 'pending' && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={busy || !backendEnabled}
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                `Delete this bet and return your ${money(b.stake)} stake? This bet will no longer count toward your weekly minimum.`,
-                              )
-                            ) {
-                              action(
-                                () => call('deleteBet', { betId: b.id }),
-                                'Bet deleted. Your stake has been returned.',
-                              );
-                            }
-                          }}
-                        >
-                          Delete bet
-                        </Button>
-                      )}
-                      {b.uid === user?.uid &&
-                        ['won', 'lost'].includes(b.status) &&
-                        b.review?.status !== 'open' &&
-                        !(
-                          b.review?.status === 'resolved' &&
-                          b.review.settledAt === b.settledAt
-                        ) && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={busy || !backendEnabled}
-                            onClick={() => {
-                              setFlaggingBet(b.id);
-                              setFlagReason('');
-                            }}
-                          >
-                            Flag for commissioner review
-                          </Button>
-                        )}
-                      {flaggingBet === b.id &&
-                        b.review?.status !== 'open' &&
-                        !(
-                          b.review?.status === 'resolved' &&
-                          b.review.settledAt === b.settledAt
-                        ) && (
-                          <form
-                            onSubmit={(e) => {
-                              e.preventDefault();
-                              action(async () => {
-                                await call('flagBet', {
-                                  betId: b.id,
-                                  reason: flagReason,
-                                });
-                                setFlaggingBet('');
-                                setFlagReason('');
-                              }, 'Flag sent to the commissioner.');
-                            }}
-                          >
-                            <label>
-                              Describe the discrepancy
-                              <textarea
-                                required
-                                minLength={3}
-                                maxLength={500}
-                                value={flagReason}
-                                onChange={(e) => setFlagReason(e.target.value)}
-                                placeholder="Incorrect result, stat correction, or injury protection…"
-                              />
-                            </label>
-                            <Button
-                              type="submit"
-                              disabled={busy || !backendEnabled}
-                            >
-                              Submit review request
-                            </Button>{' '}
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => setFlaggingBet('')}
-                            >
-                              Cancel
-                            </Button>
-                          </form>
-                        )}
-                      {b.reviewReason && (
-                        <p className="tiny">{b.reviewReason}</p>
-                      )}
-                    </article>
-                  ))
-                ) : (
-                  <div className="empty">
-                    <Ticket size={36} />
-                    <h3>No picks here yet.</h3>
-                    <p>Placed bets appear here for everyone in the league.</p>
-                  </div>
-                )}
-              </section>
+              <BetFeed
+                filter={filter}
+                setFilter={setFilter}
+                viewWeek={viewWeek}
+                setViewWeek={setViewWeek}
+                weekOptions={weekOptions}
+                config={config}
+                feedLoading={feedLoading}
+                shownBets={shownBets}
+                events={events}
+                now={now}
+                user={user}
+                busy={busy}
+                backendEnabled={backendEnabled}
+                action={action}
+                hasMore={hasMore}
+                loadMore={loadMore}
+              />
             </TabsContent>
             <TabsContent value="rules">
               <section className="panel rules">
@@ -1185,685 +950,86 @@ export default function Home() {
             </TabsContent>
             {commissioner && (
               <TabsContent value="commissioner">
-                <section className="panel">
-                  <h2>Late-entry requests</h2>
-                  {joinRequests.filter((r) => r.status === 'pending').length ===
-                    0 && <p className="hint">No late-entry requests.</p>}
-                  {joinRequests
-                    .filter((r) => r.status === 'pending')
-                    .map((r) => (
-                      <form
-                        className="bet-card"
-                        key={r.id}
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          action(
-                            () =>
-                              call('reviewJoinRequest', {
-                                requestId: r.id,
-                                approve: true,
-                                bankroll: Math.round(
-                                  Number(
-                                    joinBudgets[r.id] ??
-                                      lateJoinBankroll(now, start) / 100,
-                                  ) * 100,
-                                ),
-                              }),
-                            'Late entry approved.',
-                          );
-                        }}
-                      >
-                        <strong>{r.username}</strong>
-                        <label>
-                          Starting bankroll ($)
-                          <input
-                            type="number"
-                            min="0"
-                            max="1000000"
-                            step="0.01"
-                            required
-                            value={
-                              joinBudgets[r.id] ??
-                              String(lateJoinBankroll(now, start) / 100)
-                            }
-                            onChange={(e) =>
-                              setJoinBudgets({
-                                ...joinBudgets,
-                                [r.id]: e.target.value,
-                              })
-                            }
-                          />
-                        </label>
-                        <p className="hint">
-                          Default: $10 for each remaining betting week,
-                          including the current week while it is open.
-                        </p>
-                        <Button
-                          type="submit"
-                          disabled={busy || !backendEnabled}
-                        >
-                          Approve entry
-                        </Button>{' '}
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={busy || !backendEnabled}
-                          onClick={() =>
-                            action(
-                              () =>
-                                call('reviewJoinRequest', {
-                                  requestId: r.id,
-                                  approve: false,
-                                }),
-                              'Entry request declined.',
-                            )
-                          }
-                        >
-                          Decline
-                        </Button>
-                      </form>
-                    ))}
-                  <h2>Player review requests</h2>
-                  {bets.filter((b) => b.review?.status === 'open').length ===
-                    0 && (
-                    <p className="hint">No player flags awaiting review.</p>
-                  )}
-                  {bets
-                    .filter((b) => b.review?.status === 'open')
-                    .map((b) => (
-                      <article className="bet-card" key={b.id}>
-                        <strong>
-                          {b.username} · {b.selection}
-                        </strong>
-                        <p>{b.review.reason}</p>
-                        <p className="tiny">
-                          Posted result: {b.status} ·{' '}
-                          {date(b.review.requestedAt)}
-                        </p>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => {
-                            setSelectedBet(b.id);
-                            setResult(b.status);
-                            setReason('');
-                          }}
-                        >
-                          Review this result
-                        </Button>
-                      </article>
-                    ))}
-                  <h2>Other parlay legs to verify</h2>
-                  {bets
-                    .filter(
-                      (b) => b.market === 'Parlay' && b.status === 'pending',
-                    )
-                    .flatMap((b) =>
-                      (b.legs ?? []).map((leg: any, i: number) => {
-                        if (leg.market !== 'Other' || leg.verifiedBy)
-                          return null;
-                        const key = b.id + '_' + i;
-                        return (
-                          <article className="bet-card" key={key}>
-                            <strong>
-                              {b.username} · Leg {i + 1}
-                            </strong>
-                            <p>{leg.selection}</p>
-                            <label>
-                              Verification source or reason
-                              <input
-                                required
-                                minLength={3}
-                                maxLength={500}
-                                value={legReasons[key] ?? ''}
-                                onChange={(e) =>
-                                  setLegReasons({
-                                    ...legReasons,
-                                    [key]: e.target.value,
-                                  })
-                                }
-                              />
-                            </label>
-                            <div className="leg-verification">
-                              {['won', 'lost', 'push', 'void'].map((value) => (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  key={value}
-                                  disabled={
-                                    busy ||
-                                    !backendEnabled ||
-                                    (legReasons[key] ?? '').trim().length < 3 ||
-                                    (now < leg.startsAt && value !== 'void')
-                                  }
-                                  onClick={() =>
-                                    action(
-                                      () =>
-                                        call('verifyParlayLeg', {
-                                          betId: b.id,
-                                          legIndex: i,
-                                          result: value,
-                                          reason: legReasons[key],
-                                        }),
-                                      'Leg verified. Parlay payout checked.',
-                                    )
-                                  }
-                                >
-                                  {value}
-                                </Button>
-                              ))}
-                            </div>
-                          </article>
-                        );
-                      }),
-                    )}
-                  <h2>Results & corrections</h2>
-                  {bets
-                    .filter(
-                      (b) =>
-                        b.market === 'Parlay' &&
-                        b.status === 'pending' &&
-                        b.reviewReason,
-                    )
-                    .map((b) => (
-                      <article className="bet-card" key={b.id}>
-                        <strong>
-                          {b.username} · {b.selection}
-                        </strong>
-                        <p>{b.reviewReason}</p>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => {
-                            setSelectedBet(b.id);
-                            setAdjustedOdds('');
-                            setResult('won');
-                            setReason('');
-                          }}
-                        >
-                          Review odds and payout
-                        </Button>
-                      </article>
-                    ))}
-                  <p className="hint">
-                    Confirm the existing result to close a flag, or choose a
-                    correction. Every balance adjustment is recorded for the
-                    league.
-                  </p>
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      action(
-                        () =>
-                          call('settleBet', {
-                            betId: selectedBet,
-                            adjustedOdds:
-                              bets.find((b) => b.id === selectedBet)?.market ===
-                                'Parlay' && adjustedOdds !== ''
-                                ? Number(adjustedOdds)
-                                : null,
-                            result,
-                            reason,
-                          }),
-                        'Result saved and balance adjusted.',
-                      );
-                    }}
-                  >
-                    <label>
-                      Bet
-                      <Picker
-                        value={selectedBet}
-                        onChange={(value) => {
-                          setSelectedBet(value);
-                          setAdjustedOdds('');
-                        }}
-                        label="Bet to settle"
-                        items={bets.map((b) => ({
-                          value: b.id,
-                          label:
-                            b.username +
-                            ' · ' +
-                            b.selection +
-                            ' (' +
-                            b.status +
-                            ')',
-                        }))}
-                      />
-                    </label>
-                    <label>
-                      Result
-                      <Picker
-                        value={result}
-                        onChange={setResult}
-                        label="Result"
-                        items={['won', 'lost', 'push', 'void'].map((v) => ({
-                          value: v,
-                          label: v,
-                        }))}
-                      />
-                    </label>
-                    {bets.find((b) => b.id === selectedBet)?.market ===
-                      'Parlay' && (
-                      <label>
-                        Revised American odds (optional)
-                        <input
-                          type="number"
-                          step="1"
-                          min="-100000"
-                          max="100000"
-                          value={adjustedOdds}
-                          onChange={(e) => setAdjustedOdds(e.target.value)}
-                          placeholder={String(
-                            bets.find((b) => b.id === selectedBet)?.odds ?? '',
-                          )}
-                        />
-                        <span className="hint">
-                          Verify the remaining legs and sportsbook’s revised
-                          odds. The payout uses these odds; leave blank to keep
-                          the current odds.
-                        </span>
-                      </label>
-                    )}
-                    <label>
-                      Source or correction reason
-                      <textarea
-                        required
-                        minLength={3}
-                        maxLength={500}
-                        value={reason}
-                        onChange={(e) => setReason(e.target.value)}
-                        placeholder="Final score / stats source and why this result is correct"
-                      />
-                    </label>
-                    <Button
-                      type="submit"
-                      className="primary"
-                      disabled={busy || !selectedBet || !backendEnabled}
-                    >
-                      Save result
-                    </Button>
-                  </form>
-                  <hr />
-                  <h2>Weekly finishes</h2>
-                  <p className="hint">
-                    Save any completed weeks that haven’t been captured yet.
-                  </p>
-                  <Button
-                    variant="outline"
-                    disabled={busy || !backendEnabled}
-                    onClick={() =>
-                      action(
-                        () => call('refreshStandings'),
-                        'Completed weeks saved.',
-                      )
+                {tab === 'commissioner' && (
+                  <Suspense
+                    fallback={
+                      <section className="panel" role="status">
+                        Loading commissioner tools…
+                      </section>
                     }
                   >
-                    Refresh weekly snapshots
-                  </Button>
-                  <p className="hint">
-                    Automatic scores:{' '}
-                    {config?.autoSettlementEnabled ? 'enabled' : 'not enabled'}
-                    {config?.lastScoresSyncAt
-                      ? ' · last sync ' + date(config.lastScoresSyncAt)
-                      : ''}
-                  </p>
-                  <p className="hint">
-                    Data provider: nflverse · free public data, no API key.
-                    Next-day settlement is scheduled for 10 a.m. Eastern when
-                    enabled. Missing stats require commissioner review.
-                  </p>
-                  {config?.dataSyncError && (
-                    <p className="notice error">{config.dataSyncError}</p>
-                  )}
-                  <h2>Correction history</h2>
-                  {[...audit]
-                    .sort((a, b) => b.at - a.at)
-                    .slice(0, 30)
-                    .map((a) => (
-                      <article className="audit" key={a.id}>
-                        <strong>
-                          {a.username}: {a.from} → {a.to}
-                        </strong>
-                        <p>{a.selection}</p>
-                        <p className="hint">
-                          {a.reason} · {money(a.delta)} · {date(a.at)}
-                        </p>
-                      </article>
-                    ))}
-                </section>
+                    <CommissionerPanel
+                      config={config}
+                      bets={bets}
+                      now={now}
+                      start={start}
+                      joinRequests={joinRequests}
+                      audit={audit}
+                      busy={busy}
+                      backendEnabled={backendEnabled}
+                      action={action}
+                      adminHasMore={adminHasMore}
+                      loadMoreAdmin={loadMoreAdmin}
+                    />
+                  </Suspense>
+                )}
               </TabsContent>
             )}
           </Tabs>
         </div>
         <aside>
-          <section className="panel slip" id="bet-slip">
-            <div className="panel-title">
-              <h2>
-                <Ticket /> Your bet slip
-              </h2>
-              <span className="tag">W{week}</span>
-            </div>
-            <form onSubmit={submit}>
-              {betSlipMissing.length > 0 && (
-                <p className="notice error" role="alert">
-                  Complete these fields before placing the bet:{' '}
-                  {betSlipMissing.join(', ')}.
-                </p>
-              )}
-              <label>
-                Game
-                <Picker
-                  value={eventId}
-                  onChange={(v) => {
-                    setEventId(v);
-                    setPlayerId('');
-                    setPropKey('');
-                  }}
-                  label="Game"
-                  items={[
-                    { value: '', label: 'Select game' },
-                    { value: 'manual', label: 'Enter event manually' },
-                    ...bettableEvents.map((e) => ({
-                      value: e.id,
-                      label: e.away_team + ' @ ' + e.home_team,
-                    })),
-                  ]}
-                />
-              </label>
-              <label>
-                Market
-                <Picker
-                  value={market}
-                  onChange={(v) => {
-                    setMarket(v);
-                    if (v === 'Parlay' && !parlayLegs.length)
-                      setParlayLegs([
-                        newParlayLeg(eventId),
-                        newParlayLeg(eventId),
-                      ]);
-                    setSide(
-                      ['Total', 'Player prop'].includes(v) ? 'over' : 'home',
-                    );
-                  }}
-                  label="Bet market"
-                  items={markets.map((v) => ({ value: v, label: v }))}
-                />
-              </label>
-              {chosenEvent && (
-                <p className="tiny">
-                  {date(Date.parse(chosenEvent.commence_time))} ·{' '}
-                  {chosenEvent.venue || 'Scheduled game'}
-                </p>
-              )}
-              {market === 'Parlay' ? (
-                <ParlayBuilder
-                  legs={parlayLegs}
-                  onChange={setParlayLegs}
-                  defaultEventId={eventId}
-                  rosters={rosters}
-                  events={events.filter(
-                    (e) =>
-                      !e.completed &&
-                      (e.provider !== 'nflverse' || e.status === 'NS') &&
-                      Date.parse(e.commence_time) > now &&
-                      Date.parse(e.commence_time) < weekEnd(start, week),
-                  )}
-                />
-              ) : structuredProp ? (
-                <>
-                  <label>
-                    Player
-                    <Picker
-                      value={playerId}
-                      onChange={(v) => {
-                        setPlayerId(v);
-                        setPropKey('');
-                      }}
-                      label="Player"
-                      items={[
-                        { value: '', label: 'Choose a player' },
-                        ...gamePlayers
-                          .filter((p) => propsForPosition(p.position).length)
-                          .map((p) => ({
-                            value: p.id,
-                            label:
-                              p.name +
-                              ' · ' +
-                              p.position +
-                              ' · ' +
-                              (p.teamId === chosenEvent?.homeTeamId
-                                ? chosenEvent?.home_team
-                                : chosenEvent?.away_team),
-                          })),
-                      ]}
-                    />
-                  </label>
-                  {!gamePlayers.length && (
-                    <p className="hint">
-                      This team’s roster has not been imported yet. You can use
-                      “Enter event manually” for a custom pick.
-                    </p>
-                  )}
-                  <label>
-                    Player prop
-                    <Picker
-                      value={propKey}
-                      onChange={(value) => {
-                        setPropKey(value);
-                        if (value === 'anytime_td') {
-                          setSide('over');
-                          setLine('0.5');
-                        }
-                      }}
-                      label="Player statistic"
-                      items={[
-                        { value: '', label: 'Choose a statistic' },
-                        ...availableProps.map((p) => ({
-                          value: p.key,
-                          label: p.label,
-                        })),
-                      ]}
-                    />
-                  </label>
-                  {propKey === 'anytime_td' ? (
-                    <p className="hint">
-                      Player must score at least one rushing or receiving
-                      touchdown. Passing touchdowns do not count.
-                    </p>
-                  ) : (
-                    <div className="two">
-                      <label>
-                        Direction
-                        <Picker
-                          value={side}
-                          onChange={setSide}
-                          label="Prop direction"
-                          items={[
-                            { value: 'over', label: 'Over' },
-                            { value: 'under', label: 'Under' },
-                          ]}
-                        />
-                      </label>
-                      <label>
-                        Line
-                        <input
-                          required
-                          min="0"
-                          max="10000"
-                          type="number"
-                          step="0.5"
-                          value={line}
-                          onChange={(e) => setLine(e.target.value)}
-                          placeholder="e.g. 64.5"
-                        />
-                      </label>
-                    </div>
-                  )}
-                  <p className="tiny">
-                    Prop choices are based on position, not a live sportsbook
-                    listing. Enter your sportsbook’s odds and, when applicable,
-                    line. Anytime touchdown counts rushing or receiving
-                    touchdowns.
-                  </p>
-                </>
-              ) : structured ? (
-                <>
-                  <label>
-                    Selection
-                    <Picker
-                      value={side}
-                      onChange={setSide}
-                      label="Side"
-                      items={
-                        market === 'Total'
-                          ? [
-                              { value: 'over', label: 'Over' },
-                              { value: 'under', label: 'Under' },
-                            ]
-                          : [
-                              {
-                                value: 'home',
-                                label: chosenEvent?.home_team ?? 'Home',
-                              },
-                              {
-                                value: 'away',
-                                label: chosenEvent?.away_team ?? 'Away',
-                              },
-                            ]
-                      }
-                    />
-                  </label>
-                  {market !== 'Moneyline' && (
-                    <label>
-                      {market === 'Spread'
-                        ? 'Spread for selected team'
-                        : 'Total points line'}
-                      <input
-                        required
-                        type="number"
-                        step="0.5"
-                        value={line}
-                        onChange={(e) => setLine(e.target.value)}
-                        placeholder={market === 'Spread' ? '-3.5' : '45.5'}
-                      />
-                    </label>
-                  )}
-                  <p className="tiny">
-                    Full game including overtime. Two-way moneyline ties push.
-                  </p>
-                </>
-              ) : (
-                <label>
-                  Pick / selection
-                  <textarea
-                    required
-                    maxLength={400}
-                    value={selection}
-                    onChange={(e) => setSelection(e.target.value)}
-                    placeholder={
-                      market === 'Parlay'
-                        ? 'List every leg and its line. Use the earliest leg’s start time.'
-                        : 'e.g. Buffalo −3.5, full game including overtime'
-                    }
-                  />
-                </label>
-              )}
-              {eventId === 'manual' && market !== 'Parlay' && (
-                <label>
-                  Event starts (your device’s local time)
-                  <input
-                    required
-                    type="datetime-local"
-                    value={startsAt}
-                    onChange={(e) => setStartsAt(e.target.value)}
-                  />
-                </label>
-              )}
-              <p className="hint">
-                All bets follow{' '}
-                <a href={LEAGUE_RULES.url} target="_blank" rel="noreferrer">
-                  FanDuel Connecticut rules
-                </a>
-                . Injury protection and special cases require commissioner
-                verification.
-              </p>
-              <div className="two">
-                <label>
-                  American odds
-                  <input
-                    required
-                    type="number"
-                    step="1"
-                    min="-100000"
-                    max="100000"
-                    value={odds}
-                    onChange={(e) => setOdds(e.target.value)}
-                    placeholder="e.g. -110"
-                  />
-                </label>
-                <label>
-                  Stake ($)
-                  <input
-                    required
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    max={available / 100}
-                    value={stake}
-                    onChange={(e) => setStake(e.target.value)}
-                    placeholder="e.g. 10.00"
-                  />
-                </label>
-              </div>
-              <div className="return">
-                <span>
-                  Potential return <small>Includes your stake</small>
-                </span>
-                <strong>{money(potential)}</strong>
-              </div>
-              <Button
-                type={user ? 'submit' : 'button'}
-                onClick={!user ? () => action(login) : undefined}
-                className="primary"
-                disabled={
-                  busy ||
-                  !authReady ||
-                  showBalanceLoading ||
-                  (!!user &&
-                    (!backendEnabled ||
-                      !me ||
-                      !inSeason ||
-                      available === 0 ||
-                      (structuredProp && (!playerId || !propKey)) ||
-                      (market === 'Parlay' && parlayLegs.length < 2)))
-                }
-              >
-                {showBalanceLoading
-                  ? balanceLoadFailed
-                    ? 'Balances unavailable'
-                    : 'Loading balances…'
-                  : busy
-                    ? 'Working…'
-                    : !user
-                      ? 'Sign in to place your bet'
-                      : !backendEnabled
-                        ? 'Betting server is paused'
-                        : !me
-                          ? 'Join the league first'
-                          : !inSeason
-                            ? 'Betting is not open'
-                            : available === 0
-                              ? 'Weekly allowance used'
-                              : 'Place bet'}{' '}
-                <ArrowUpRight size={17} />
-              </Button>
-            </form>
-            <p className="hint">
-              <ShieldCheck size={15} className="inline-icon" /> Your{' '}
-              {showBalanceLoading ? 'future-week' : money(reserve)} reserve
-              stays protected. Submitted bets cannot be edited.
-            </p>
-          </section>
+          <BetSlip
+            eventId={eventId}
+            market={market}
+            playerId={playerId}
+            propKey={propKey}
+            side={side}
+            line={line}
+            selection={selection}
+            startsAt={startsAt}
+            odds={odds}
+            stake={stake}
+            start={start}
+            draftNotice={draftNotice}
+            week={week}
+            now={now}
+            available={available}
+            reserve={reserve}
+            potential={potential}
+            authReady={authReady}
+            busy={busy}
+            backendEnabled={backendEnabled}
+            balanceLoadFailed={balanceLoadFailed}
+            showBalanceLoading={showBalanceLoading}
+            structuredProp={structuredProp}
+            structured={structured}
+            inSeason={inSeason}
+            setEventId={setEventId}
+            setMarket={setMarket}
+            setPlayerId={setPlayerId}
+            setPropKey={setPropKey}
+            setSide={setSide}
+            setLine={setLine}
+            setSelection={setSelection}
+            setStartsAt={setStartsAt}
+            setOdds={setOdds}
+            setStake={setStake}
+            user={user}
+            me={me}
+            chosenEvent={chosenEvent}
+            bettableEvents={bettableEvents}
+            rosters={rosters}
+            events={events}
+            gamePlayers={gamePlayers}
+            availableProps={availableProps}
+            parlayLegs={parlayLegs}
+            setParlayLegs={setParlayLegs}
+            submit={submit}
+            action={action}
+            clearDraft={clearDraft}
+            resetDraft={resetDraft}
+            betSlipMissing={betSlipMissing}
+          />
           <div className="sidebar-note">
             <span className="eyebrow">THE LONG GAME</span>
             <p>

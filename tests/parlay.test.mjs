@@ -34,13 +34,13 @@ const normalize = (leg, ev = game, players = []) =>
 const bet = { legs: [normalize(moneyline), normalize(total)] };
 const events = { g1: finished, g2: finished };
 
-test('parlays win only when all legs win across their respective games', () => {
+void test('parlays win only when all legs win across their respective games', () => {
   assert.equal(gradeParlay(bet, events, {}).result, 'won');
   assert.equal(gradeParlay(bet, { g1: finished }, {}).result, null);
   assert.equal(gradeParlay(bet, { g1: game, g2: finished }, {}).result, null);
   assert.equal(payout(1000, 260, gradeParlay(bet, events, {}).result), 3600);
 });
-test('a losing leg loses even with unfinished or unverified legs', () => {
+void test('a losing leg loses even with unfinished or unverified legs', () => {
   const losing = {
     ...bet,
     legs: [
@@ -50,7 +50,7 @@ test('a losing leg loses even with unfinished or unverified legs', () => {
   };
   assert.equal(gradeParlay(losing, { g1: finished }, {}).result, 'lost');
 });
-test('Other legs require commissioner verification and cannot self-report a win', () => {
+void test('Other legs require commissioner verification and cannot self-report a win', () => {
   const custom = normalize({
     market: 'Other',
     eventId: 'g2',
@@ -65,7 +65,7 @@ test('Other legs require commissioner verification and cannot self-report a win'
   mixed.legs[1].verifiedBy = 'commissioner';
   assert.equal(gradeParlay(mixed, events, {}).result, 'won');
 });
-test('push and void keep the parlay pending for commissioner odds review', () => {
+void test('push and void keep the parlay pending for commissioner odds review', () => {
   const tied = { ...bet, legs: [bet.legs[0], { ...bet.legs[1], line: 45 }] };
   assert.equal(gradeParlay(tied, events, {}).result, null);
   assert.equal(gradeParlay(tied, events, {}).needsOddsReview, true);
@@ -93,7 +93,7 @@ test('push and void keep the parlay pending for commissioner odds review', () =>
     null,
   );
 });
-test('anytime touchdown parlay legs accept rushing or receiving and retain participation checks', () => {
+void test('anytime touchdown parlay legs accept rushing or receiving and retain participation checks', () => {
   const prop = normalize(
     {
       market: 'Player prop',
@@ -122,7 +122,7 @@ test('anytime touchdown parlay legs accept rushing or receiving and retain parti
   }
   assert.equal(gradeParlay(parlay, events, {}).result, null);
 });
-test('leg validation rejects past, next-week, completed, unknown and malformed picks', () => {
+void test('leg validation rejects past, next-week, completed, unknown and malformed picks', () => {
   assert.throws(() => normalize(moneyline, { ...game, completed: true }));
   assert.throws(() =>
     normalize(moneyline, { ...game, commence_time: '2026-09-08T15:00:00Z' }),
@@ -150,7 +150,7 @@ test('leg validation rejects past, next-week, completed, unknown and malformed p
     null,
   );
 });
-test('duplicate selections, fewer than two and excessive legs are rejected', () => {
+void test('duplicate selections, fewer than two and excessive legs are rejected', () => {
   assert.doesNotThrow(() => validateParlayLegs(bet.legs));
   assert.throws(() => validateParlayLegs([bet.legs[0]]));
   assert.throws(() =>
@@ -161,7 +161,7 @@ test('duplicate selections, fewer than two and excessive legs are rejected', () 
   );
   assert.throws(() => validateParlayLegs(Array(21).fill(bet.legs[0])));
 });
-test('nflverse imports box scores for player props nested inside pending parlays', async () => {
+void test('nflverse imports box scores for player props nested inside pending parlays', async () => {
   const csv =
     'game_id,season,game_type,week,gameday,gametime,away_team,home_team,away_score,home_score,stadium\n2026_01_BUF_LA,2026,REG,1,2026-09-10,20:20,BUF,LA,21,24,Stadium';
   const writes = new Map(),
@@ -191,7 +191,7 @@ test('nflverse imports box scores for player props nested inside pending parlays
   assert.ok(writes.has('gameStats/nv_2026_01_BUF_LA'));
 });
 
-test('commissioner revised odds determine payout and reject invalid changes', () => {
+void test('commissioner revised odds determine payout and reject invalid changes', () => {
   const original = { market: 'Parlay', odds: 260 };
   assert.equal(parlaySettlementOdds(original, null), 260);
   assert.equal(payout(1000, parlaySettlementOdds(original, -110), 'won'), 1909);

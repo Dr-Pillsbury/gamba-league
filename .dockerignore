@@ -6,3 +6,11 @@ dist
 firebase-debug.log
 *.log
 .env.local
+.env*
+work
+outputs
+functions/node_modules
+.firebase
+.codex
+.agents
+tests
