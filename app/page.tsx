@@ -124,12 +124,13 @@ export default function Home() {
     [filter, setFilter] = useState('all');
   const [selection, setSelection] = useState(''),
     [market, setMarket] = useState('Moneyline'),
-    [odds, setOdds] = useState('-110'),
-    [stake, setStake] = useState('10.00'),
+    [odds, setOdds] = useState(''),
+    [stake, setStake] = useState(''),
     [startsAt, setStartsAt] = useState(''),
-    [eventId, setEventId] = useState('manual'),
+    [eventId, setEventId] = useState(''),
     [side, setSide] = useState('home'),
     [line, setLine] = useState('');
+  const [betSlipMissing, setBetSlipMissing] = useState<string[]>([]);
   const [playerId, setPlayerId] = useState(''),
     [propKey, setPropKey] = useState('');
   const [parlayLegs, setParlayLegs] = useState<ParlayDraft[]>([]);
@@ -255,9 +256,18 @@ export default function Home() {
         .reduce((n, l) => n + l.delta, 0),
     balance = me?.balance ?? INITIAL,
     { available, reserve, needed } = funds(balance, opening, staked, week);
-  const chosenEvent = events.find((e) => e.id === eventId),
+  const bettableEvents = events
+    .filter(
+      (e) =>
+        !e.completed &&
+        (e.provider !== 'nflverse' || e.status === 'NS') &&
+        Date.parse(e.commence_time) > now &&
+        Date.parse(e.commence_time) < weekEnd(start, week),
+    )
+    .sort((a, b) => Date.parse(a.commence_time) - Date.parse(b.commence_time));
+  const chosenEvent = bettableEvents.find((e) => e.id === eventId),
     structured =
-      eventId !== 'manual' && ['Moneyline', 'Spread', 'Total'].includes(market),
+      !!chosenEvent && ['Moneyline', 'Spread', 'Total'].includes(market),
     potential =
       Number.isInteger(Number(odds)) &&
       Math.abs(Number(odds)) >= 100 &&
@@ -334,6 +344,68 @@ export default function Home() {
       await action(login);
       return;
     }
+    const missing: string[] = [];
+    const numeric = (value: string) =>
+      value.trim() !== '' && Number.isFinite(Number(value));
+    if (!market) missing.push('Market');
+    if (market !== 'Parlay' && !eventId) missing.push('Game');
+    if (market !== 'Parlay' && eventId === 'manual' && !startsAt)
+      missing.push('Event start time');
+    if (market === 'Player prop' && (!playerId || !propKey))
+      missing.push(!playerId ? 'Player' : 'Player statistic');
+    if (market === 'Player prop' && propKey !== 'anytime_td' && !numeric(line))
+      missing.push('Prop line');
+    if (market === 'Parlay') {
+      if (parlayLegs.length < 2) missing.push('At least two parlay selections');
+      parlayLegs.forEach((leg, i) => {
+        const n = i + 1;
+        if (
+          leg.market !== 'Other' &&
+          (!leg.eventId || leg.eventId === 'manual')
+        )
+          missing.push(`Leg ${n} game`);
+        if (leg.market === 'Other' && !leg.selection.trim())
+          missing.push(`Leg ${n} selection`);
+        if (leg.market === 'Other' && leg.eventId === 'manual' && !leg.startsAt)
+          missing.push(`Leg ${n} event start time`);
+        if (leg.market === 'Player prop' && !leg.playerId)
+          missing.push(`Leg ${n} player`);
+        if (leg.market === 'Player prop' && !leg.propKey)
+          missing.push(`Leg ${n} player statistic`);
+        if (
+          leg.market !== 'Moneyline' &&
+          leg.market !== 'Other' &&
+          leg.propKey !== 'anytime_td' &&
+          !numeric(leg.line)
+        )
+          missing.push(`Leg ${n} line`);
+      });
+    }
+    if (market === 'Other' && !selection.trim())
+      missing.push('Pick / selection');
+    if (!numeric(odds)) missing.push('American odds');
+    if (!numeric(stake) || Number(stake) <= 0) missing.push('Stake');
+    if (missing.length) {
+      setBetSlipMissing(missing);
+      setError(`Complete: ${missing.join(', ')}.`);
+      requestAnimationFrame(() => {
+        const selectors: Record<string, string> = {
+          Market: '[aria-label="Bet market"]',
+          Game: '[aria-label="Game"]',
+          Player: '[aria-label="Player"]',
+          'Player statistic': '[aria-label="Player statistic"]',
+        };
+        const first =
+          document.querySelector<HTMLElement>(selectors[missing[0]]) ??
+          document.querySelector<HTMLElement>(
+            'input:invalid, textarea:invalid, select:invalid',
+          );
+        first?.focus();
+        first?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      });
+      return;
+    }
+    setBetSlipMissing([]);
     const cents = Number(stake) * 100;
     if (Math.abs(cents - Math.round(cents)) > 0.00001) {
       setError('Use no more than two decimal places for your stake.');
@@ -347,7 +419,8 @@ export default function Home() {
         market === 'Parlay'
           ? parlayLegs.map((leg) => ({
               ...leg,
-              eventId: leg.eventId === 'manual' ? null : leg.eventId,
+              eventId:
+                leg.eventId && leg.eventId !== 'manual' ? leg.eventId : null,
               line: leg.line === '' ? null : Number(leg.line),
               startsAt: Date.parse(leg.startsAt) || null,
             }))
@@ -357,7 +430,10 @@ export default function Home() {
       startsAt: chosenEvent
         ? Date.parse(chosenEvent.commence_time)
         : Date.parse(startsAt),
-      eventId: eventId === 'manual' || market === 'Parlay' ? null : eventId,
+      eventId:
+        eventId && eventId !== 'manual' && market !== 'Parlay'
+          ? eventId
+          : null,
       side: structured || structuredProp ? side : null,
       line:
         (structured && market !== 'Moneyline') || structuredProp
@@ -366,6 +442,12 @@ export default function Home() {
       playerId: structuredProp ? playerId : null,
       propKey: structuredProp ? propKey : null,
     };
+    if (
+      ![payload.odds, payload.stake, payload.startsAt].every(Number.isFinite)
+    ) {
+      setError('Complete the highlighted betslip fields with valid numbers.');
+      return;
+    }
     const signature = JSON.stringify(payload);
     if (request.current.signature !== signature)
       request.current = { signature, id: crypto.randomUUID() };
@@ -374,7 +456,8 @@ export default function Home() {
       request.current = { signature: '', id: '' };
       setSelection('');
       setParlayLegs([]);
-      setStake('10.00');
+      setOdds('');
+      setStake('');
     }, 'Bet placed. Everyone in the league can now see your pick.');
   }
   useEffect(() => {
@@ -674,7 +757,7 @@ export default function Home() {
                 <p className="hint">
                   {viewWeek === 'live'
                     ? 'Ranked by current account balance. Weekly finishes are saved after Monday closes.'
-                    : 'Balance at Tuesday midnight Eastern. Later corrections appear in the live standings.'}
+                    : 'Balance after the Tuesday deadline and any missed-minimum penalty. Later corrections appear in the live standings.'}
                 </p>
                 {!rows.length ? (
                   <div className="empty">
@@ -725,7 +808,7 @@ export default function Home() {
                                 ? '✓'
                                 : viewWeek === 'live'
                                   ? ' / $10'
-                                  : ' · missed'}
+                                  : ` · missed${m.minimumPenalty ? ` (−${money(m.minimumPenalty)})` : ''}`}
                             </span>
                           </TableCell>
                           <TableCell className="right balance-cell">
@@ -992,6 +1075,10 @@ export default function Home() {
                     minimum; voids do not.
                   </li>
                   <li>
+                    <strong>No early cashouts are available.</strong> Players
+                    must stick to the bets they have placed.
+                  </li>
+                  <li>
                     <strong>Everyone can see the picks.</strong> Freeform props
                     and unusual markets need a clear description of every
                     condition and a commissioner result. Structured parlay legs
@@ -1016,8 +1103,9 @@ export default function Home() {
                     <strong>Weekly standings preserve the cutoff.</strong>{' '}
                     Pending bets have already deducted the stake. Later payouts
                     and corrections affect current standings, not saved weekly
-                    finishes. Missed minimums are flagged; no automatic penalty
-                    is applied. Tied balances share rank.
+                    finishes. If you miss the $10 minimum, the amount you were
+                    short is deducted at the deadline as a loss. Tied balances
+                    share rank.
                   </li>
                 </ol>
               </section>
@@ -1383,6 +1471,12 @@ export default function Home() {
               <span className="tag">W{week}</span>
             </div>
             <form onSubmit={submit}>
+              {betSlipMissing.length > 0 && (
+                <p className="notice error" role="alert">
+                  Complete these fields before placing the bet:{' '}
+                  {betSlipMissing.join(', ')}.
+                </p>
+              )}
               <label>
                 Game
                 <Picker
@@ -1394,19 +1488,12 @@ export default function Home() {
                   }}
                   label="Game"
                   items={[
+                    { value: '', label: 'Select game' },
                     { value: 'manual', label: 'Enter event manually' },
-                    ...events
-                      .filter(
-                        (e) =>
-                          !e.completed &&
-                          (e.provider !== 'nflverse' || e.status === 'NS') &&
-                          Date.parse(e.commence_time) > now &&
-                          Date.parse(e.commence_time) < weekEnd(start, week),
-                      )
-                      .map((e) => ({
-                        value: e.id,
-                        label: e.away_team + ' @ ' + e.home_team,
-                      })),
+                    ...bettableEvents.map((e) => ({
+                      value: e.id,
+                      label: e.away_team + ' @ ' + e.home_team,
+                    })),
                   ]}
                 />
               </label>
@@ -1638,6 +1725,7 @@ export default function Home() {
                     max="100000"
                     value={odds}
                     onChange={(e) => setOdds(e.target.value)}
+                    placeholder="e.g. -110"
                   />
                 </label>
                 <label>
@@ -1650,6 +1738,7 @@ export default function Home() {
                     max={available / 100}
                     value={stake}
                     onChange={(e) => setStake(e.target.value)}
+                    placeholder="e.g. 10.00"
                   />
                 </label>
               </div>

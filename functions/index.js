@@ -19,6 +19,7 @@ import {
   weekStart,
   weekEnd,
   lateJoinBankroll,
+  minimumShortfall,
   validateBet,
   payout,
   grade,
@@ -628,10 +629,9 @@ async function closeWeeks() {
     await db.runTransaction(async (tx) => {
       const existing = await tx.get(ref);
       if (existing.exists) return;
-      const [ms, ls, bs] = await Promise.all([
+      const [ms, ls] = await Promise.all([
         tx.get(db.collection('members')),
         tx.get(db.collection('ledger')),
-        tx.get(db.collection('bets')),
       ]);
       const cutoff = weekEnd(c.startDate, week);
       const rows = ms.docs
@@ -656,12 +656,26 @@ async function closeWeeks() {
                 : 0)
             );
           }, 0);
+          const minimumPenalty = minimumShortfall(staked);
+          if (minimumPenalty > 0) {
+            tx.update(m.ref, { balance: m.data().balance - minimumPenalty });
+            tx.create(db.collection('ledger').doc(), {
+              uid: m.id,
+              delta: -minimumPenalty,
+              at: cutoff,
+              kind: 'missed weekly minimum',
+              week,
+              stakeDelta: 0,
+              minimumShortfall: minimumPenalty,
+            });
+          }
           return {
             uid: m.id,
             username: m.data().username,
-            balance,
+            balance: balance - minimumPenalty,
             staked,
             minimumMet: staked >= 1000,
+            minimumPenalty,
           };
         })
         .sort((a, b) => b.balance - a.balance);

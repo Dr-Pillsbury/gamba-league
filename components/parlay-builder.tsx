@@ -91,11 +91,8 @@ export function ParlayBuilder({
                   })
                 }
               >
-                <option value="manual">
-                  {leg.market === 'Other'
-                    ? 'Enter event manually'
-                    : 'Choose a game'}
-                </option>
+                <option value="">Select game</option>
+                <option value="manual">Enter event manually</option>
                 {events.map((e) => (
                   <option key={e.id} value={e.id}>
                     {e.away_team} @ {e.home_team}

@@ -48,11 +48,19 @@ export function lateJoinBankroll(ms, start) {
   const week = Math.max(1, weekAt(ms, start));
   return Math.max(0, WEEKS - week + (ms < weekEnd(start, week) ? 1 : 0)) * MINIMUM;
 }
+export function minimumShortfall(staked) {
+  return Math.max(0, MINIMUM - staked);
+}
 export function payout(stake, odds, status) {
   if (status === 'push' || status === 'void') return stake;
   if (status === 'lost' || status === 'pending') return 0;
   if (status !== 'won') throw Error('Unknown result.');
-  return stake + Math.round(stake * (odds > 0 ? odds / 100 : 100 / -odds));
+  // Keep this calculation in integer cents. Floating-point American-odds
+  // calculations can turn an exact half-cent into a value just below it.
+  const numerator = odds > 0 ? stake * odds : stake * 100;
+  const denominator = odds > 0 ? 100 : -odds;
+  const profit = Math.floor((2 * numerator + denominator) / (2 * denominator));
+  return stake + profit;
 }
 export function funds(balance, opening, staked, week) {
   const reserve = Math.max(0, WEEKS - week) * MINIMUM;

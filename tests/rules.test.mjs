@@ -8,6 +8,7 @@ import {
   weekEnd,
   bettingOpen,
   lateJoinBankroll,
+  minimumShortfall,
   validateBet,
   grade,
 } from '../functions/rules.js';
@@ -52,9 +53,16 @@ test('split stakes count toward the minimum and cannot spend pending returns', (
 test('American odds round payout to cents with stake included', () => {
   assert.equal(payout(1000, -110, 'won'), 1909);
   assert.equal(payout(1000, 150, 'won'), 2500);
+  assert.equal(payout(15, 410, 'won'), 77);
+  assert.equal(payout(15, -410, 'won'), 19);
   assert.equal(payout(1000, -110, 'push'), 1000);
   assert.equal(payout(1000, -110, 'void'), 1000);
   assert.equal(payout(1000, -110, 'lost'), 0);
+});
+test('missed weekly minimum charges only the amount still short', () => {
+  assert.equal(minimumShortfall(1000), 0);
+  assert.equal(minimumShortfall(750), 250);
+  assert.equal(minimumShortfall(0), 1000);
 });
 test('Monday closes at midnight; Tuesday 10am opens the next week', () => {
   assert.equal(bettingOpen(Date.parse('2026-09-15T03:59:59Z'), c.startDate), true);

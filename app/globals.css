@@ -749,3 +749,12 @@ textarea {
   gap: 8px;
   margin-top: 12px;
 }
+.slip input:invalid,
+.slip textarea:invalid,
+.slip select:invalid {
+  border-color: #c93434;
+  box-shadow: 0 0 0 2px rgba(201, 52, 52, 0.14);
+}
+.slip .notice.error {
+  margin: 0 0 14px;
+}
