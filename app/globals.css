@@ -245,6 +245,36 @@ header > button {
   font-size: 28px;
   color: #708581;
 }
+.balance-loading,
+.stats strong .balance-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 1.5em;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: normal;
+  color: var(--muted-foreground);
+}
+.stats strong:has(.balance-loading) {
+  min-height: 1.5em;
+  display: flex;
+  align-items: center;
+}
+.balance-loading svg {
+  color: var(--primary);
+  animation: balance-spin 1s linear infinite;
+}
+@keyframes balance-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .balance-loading svg {
+    animation: none;
+  }
+}
 .stats small {
   display: flex;
   align-items: center;

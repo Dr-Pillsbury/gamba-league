@@ -12,6 +12,7 @@ import {
   Check,
   Clock,
   CircleAlert,
+  LoaderCircle,
 } from 'lucide-react';
 import { auth, db, call, login } from '@/lib/firebase';
 import {
@@ -72,6 +73,14 @@ const markets = [
   'Parlay',
   'Other',
 ];
+function BalanceLoading({ failed = false }: { failed?: boolean }) {
+  return (
+    <span className="balance-loading" role="status">
+      {!failed && <LoaderCircle size={18} aria-hidden="true" />}
+      {failed ? 'Unavailable' : 'Loading…'}
+    </span>
+  );
+}
 function Picker({
   value,
   onChange,
@@ -101,6 +110,10 @@ function Picker({
   );
 }
 export default function Home() {
+  const [balanceSources, setBalanceSources] = useState<Record<string, string>>(
+    {},
+  );
+  const [balanceLoadFailed, setBalanceLoadFailed] = useState(false);
   const [user, setUser] = useState<User | null>(null),
     [authReady, setAuthReady] = useState(false),
     [config, setConfig] = useState<RecordData | null>(null),
@@ -149,6 +162,8 @@ export default function Home() {
     setNow(Date.now());
     const t = setInterval(() => setNow(Date.now()), 30000);
     const unsub = onAuthStateChanged(auth, (u) => {
+      setBalanceSources({});
+      setBalanceLoadFailed(false);
       setUser(u);
       setAuthReady(true);
       setError('');
@@ -169,16 +184,30 @@ export default function Home() {
         'League data is unavailable. The commissioner needs to deploy Firestore rules and configure the league. ' +
           e.message,
       );
+    const balanceFail = (e: Error) => {
+      setBalanceLoadFailed(true);
+      fail(e);
+    };
     const stops = [
       onSnapshot(
         doc(db, 'config', 'league'),
-        (s) => setConfig(s.exists() ? { id: s.id, ...s.data() } : null),
-        fail,
+        { includeMetadataChanges: true },
+        (s) => {
+          setConfig(s.exists() ? { id: s.id, ...s.data() } : null);
+          if (!s.metadata.fromCache)
+            setBalanceSources((v) => ({ ...v, config: user.uid }));
+        },
+        balanceFail,
       ),
       onSnapshot(
         collection(db, 'members'),
-        (s) => setMembers(s.docs.map((d) => ({ id: d.id, ...d.data() }))),
-        fail,
+        { includeMetadataChanges: true },
+        (s) => {
+          setMembers(s.docs.map((d) => ({ id: d.id, ...d.data() })));
+          if (!s.metadata.fromCache)
+            setBalanceSources((v) => ({ ...v, members: user.uid }));
+        },
+        balanceFail,
       ),
       onSnapshot(
         collection(db, 'events'),
@@ -196,9 +225,10 @@ export default function Home() {
   useEffect(() => {
     setBets([]);
     setLedger([]);
+    setBalanceSources((v) => ({ ...v, bets: '', ledger: '' }));
     setSnapshots([]);
     setAudit([]);
-    if (!me?.id && !commissioner) return;
+    if (!user || (!me?.id && !commissioner)) return;
     const fail = (e: Error) =>
       setError('Unable to load league activity. ' + e.message);
     const stops = [
@@ -209,15 +239,22 @@ export default function Home() {
     ].map(([name, set]) =>
       onSnapshot(
         collection(db, name as string),
-        (s) =>
+        { includeMetadataChanges: true },
+        (s) => {
           (set as (r: RecordData[]) => void)(
             s.docs.map((d) => ({ id: d.id, ...d.data() })),
-          ),
-        fail,
+          );
+          if (!s.metadata.fromCache)
+            setBalanceSources((v) => ({ ...v, [name as string]: user.uid }));
+        },
+        (e) => {
+          if (name === 'bets' || name === 'ledger') setBalanceLoadFailed(true);
+          fail(e);
+        },
       ),
     );
     return () => stops.forEach((s) => s());
-  }, [me?.id, commissioner]);
+  }, [me?.id, commissioner, user]);
   useEffect(() => {
     setJoinRequests([]);
     setOwnJoinRequest(null);
@@ -245,6 +282,14 @@ export default function Home() {
     actualWeek = now ? weekAt(now, start) : 0,
     week = Math.max(1, Math.min(18, actualWeek)),
     inSeason = !!config && bettingOpen(now, start);
+  const balancesReady =
+    authReady &&
+    (!user ||
+      ['config', 'members', ...(me ? ['bets', 'ledger'] : [])].every(
+        (source) => balanceSources[source] === user.uid,
+      ));
+  const showBalanceLoading = !balancesReady || balanceLoadFailed;
+  const balancePlaceholder = <BalanceLoading failed={balanceLoadFailed} />;
   const myBets = bets.filter((b) => b.uid === user?.uid),
     staked = myBets
       .filter((b) => b.week === week && b.status !== 'void')
@@ -351,9 +396,9 @@ export default function Home() {
     if (market !== 'Parlay' && !eventId) missing.push('Game');
     if (market !== 'Parlay' && eventId === 'manual' && !startsAt)
       missing.push('Event start time');
-    if (market === 'Player prop' && (!playerId || !propKey))
+    if (structuredProp && (!playerId || !propKey))
       missing.push(!playerId ? 'Player' : 'Player statistic');
-    if (market === 'Player prop' && propKey !== 'anytime_td' && !numeric(line))
+    if (structuredProp && propKey !== 'anytime_td' && !numeric(line))
       missing.push('Prop line');
     if (market === 'Parlay') {
       if (parlayLegs.length < 2) missing.push('At least two parlay selections');
@@ -427,13 +472,15 @@ export default function Home() {
           : null,
       odds: Number(odds),
       stake: Math.round(cents),
-      startsAt: chosenEvent
-        ? Date.parse(chosenEvent.commence_time)
-        : Date.parse(startsAt),
+      // The server derives a parlay's start time from its validated legs.
+      startsAt:
+        market === 'Parlay'
+          ? null
+          : chosenEvent
+            ? Date.parse(chosenEvent.commence_time)
+            : Date.parse(startsAt),
       eventId:
-        eventId && eventId !== 'manual' && market !== 'Parlay'
-          ? eventId
-          : null,
+        eventId && eventId !== 'manual' && market !== 'Parlay' ? eventId : null,
       side: structured || structuredProp ? side : null,
       line:
         (structured && market !== 'Moneyline') || structuredProp
@@ -443,7 +490,8 @@ export default function Home() {
       propKey: structuredProp ? propKey : null,
     };
     if (
-      ![payload.odds, payload.stake, payload.startsAt].every(Number.isFinite)
+      ![payload.odds, payload.stake].every(Number.isFinite) ||
+      (market !== 'Parlay' && !Number.isFinite(payload.startsAt))
     ) {
       setError('Complete the highlighted betslip fields with valid numbers.');
       return;
@@ -642,22 +690,43 @@ export default function Home() {
       )}
       <div className="stats">
         <section>
-          <span>{me ? 'Account balance' : 'Starting balance'}</span>
-          <strong>{money(balance)}</strong>
+          <span>
+            {user || !authReady ? 'Account balance' : 'Starting balance'}
+          </span>
+          <strong>
+            {showBalanceLoading ? balancePlaceholder : money(balance)}
+          </strong>
           <small>Bankroll · pending stakes deducted</small>
         </section>
         <section>
           <span>
-            {me ? 'Available to bet · Week ' + week : 'Week 1 spending limit'}
+            {showBalanceLoading
+              ? 'Available to bet'
+              : me
+                ? 'Available to bet · Week ' + week
+                : 'Week 1 spending limit'}
           </span>
-          <strong className="lime">{money(available)}</strong>
-          <small>{money(staked)} staked this week</small>
+          <strong className="lime">
+            {showBalanceLoading ? balancePlaceholder : money(available)}
+          </strong>
+          <small>
+            {balanceLoadFailed
+              ? 'Weekly stakes unavailable'
+              : showBalanceLoading
+                ? 'Loading weekly stakes…'
+                : `${money(staked)} staked this week`}
+          </small>
         </section>
         <section>
           <span>Protected for future weeks</span>
-          <strong>{money(reserve)}</strong>
+          <strong>
+            {showBalanceLoading ? balancePlaceholder : money(reserve)}
+          </strong>
           <small>
-            <ShieldCheck size={16} /> $10 × {18 - week} remaining weeks
+            <ShieldCheck size={16} />{' '}
+            {showBalanceLoading
+              ? 'Future weeks reserved'
+              : `$10 × ${18 - week} remaining weeks`}
           </small>
         </section>
       </div>
@@ -824,15 +893,19 @@ export default function Home() {
                 <div>
                   <span className="eyebrow">WEEK {week} CHECK-IN</span>
                   <h2>
-                    {needed === 0
-                      ? 'You’re in for the week.'
-                      : money(needed) + ' left to meet your minimum.'}
+                    {showBalanceLoading
+                      ? balancePlaceholder
+                      : needed === 0
+                        ? 'You’re in for the week.'
+                        : money(needed) + ' left to meet your minimum.'}
                   </h2>
                 </div>
-                <Progress
-                  value={Math.min(100, staked / 10)}
-                  aria-label="Weekly minimum wager progress"
-                />
+                {!showBalanceLoading && (
+                  <Progress
+                    value={Math.min(100, staked / 10)}
+                    aria-label="Weekly minimum wager progress"
+                  />
+                )}
                 <p className="hint">
                   Split the $10 minimum across as many picks as you like. A
                   voided bet doesn’t count toward the minimum.
@@ -1755,6 +1828,7 @@ export default function Home() {
                 disabled={
                   busy ||
                   !authReady ||
+                  showBalanceLoading ||
                   (!!user &&
                     (!backendEnabled ||
                       !me ||
@@ -1764,26 +1838,30 @@ export default function Home() {
                       (market === 'Parlay' && parlayLegs.length < 2)))
                 }
               >
-                {busy
-                  ? 'Working…'
-                  : !user
-                    ? 'Sign in to place your bet'
-                    : !backendEnabled
-                      ? 'Betting server is paused'
-                      : !me
-                        ? 'Join the league first'
-                        : !inSeason
-                          ? 'Betting is not open'
-                          : available === 0
-                            ? 'Weekly allowance used'
-                            : 'Place bet'}{' '}
+                {showBalanceLoading
+                  ? balanceLoadFailed
+                    ? 'Balances unavailable'
+                    : 'Loading balances…'
+                  : busy
+                    ? 'Working…'
+                    : !user
+                      ? 'Sign in to place your bet'
+                      : !backendEnabled
+                        ? 'Betting server is paused'
+                        : !me
+                          ? 'Join the league first'
+                          : !inSeason
+                            ? 'Betting is not open'
+                            : available === 0
+                              ? 'Weekly allowance used'
+                              : 'Place bet'}{' '}
                 <ArrowUpRight size={17} />
               </Button>
             </form>
             <p className="hint">
               <ShieldCheck size={15} className="inline-icon" /> Your{' '}
-              {money(reserve)} reserve stays protected. Submitted bets cannot be
-              edited.
+              {showBalanceLoading ? 'future-week' : money(reserve)} reserve
+              stays protected. Submitted bets cannot be edited.
             </p>
           </section>
           <div className="sidebar-note">
