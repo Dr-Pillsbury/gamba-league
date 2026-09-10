@@ -587,11 +587,13 @@ button {
   color: var(--primary);
   border-color: #4d652d;
 }
-.status.lost {
+.status.lost,
+.tag.lost {
   color: #ff9a8d;
   border-color: #6c3f3b;
 }
-.status.pending {
+.status.pending,
+.tag.pending {
   color: #e7c371;
 }
 .bet-card h3 {

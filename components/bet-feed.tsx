@@ -109,7 +109,7 @@ export function BetFeed({
                 {(b.legs as BetLeg[]).map((leg, i) => (
                   <li key={i}>
                     {leg.selection}{' '}
-                    <span className="tag">
+                    <span className={'tag ' + leg.status}>
                       {leg.status === 'pending' && leg.market === 'Other'
                         ? 'Needs verification'
                         : leg.status}
