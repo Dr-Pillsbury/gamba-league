@@ -33,6 +33,23 @@ const normalize = (leg, ev = game, players = []) =>
   normalizeParlayLeg(leg, ev, players, now, config);
 const bet = { legs: [normalize(moneyline), normalize(total)] };
 const events = { g1: finished, g2: finished };
+void test('active parlay legs use the three-hour cutoff regardless of provider live status', () => {
+  for (const status of ['NS', 'Awaiting final data', 'Q2']) {
+    for (const elapsed of [0, 3600000, 3 * 3600000 - 1]) {
+      assert.doesNotThrow(() => normalize(moneyline, {
+        ...game, status, commence_time: new Date(now - elapsed).toISOString(),
+      }));
+    }
+    for (const elapsed of [3 * 3600000, 3 * 3600000 + 1]) {
+      assert.throws(() => normalize(moneyline, {
+        ...game, status, commence_time: new Date(now - elapsed).toISOString(),
+      }));
+    }
+  }
+  assert.throws(() => normalize(moneyline, {
+    ...finished, commence_time: new Date(now - 3600000).toISOString(),
+  }));
+});
 
 void test('parlays win only when all legs win across their respective games', () => {
   assert.equal(gradeParlay(bet, events, {}).result, 'won');

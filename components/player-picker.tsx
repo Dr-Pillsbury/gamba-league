@@ -9,11 +9,13 @@ import {
 } from '@/components/ui/combobox';
 type Item = { value: string; label: string };
 export function PlayerPicker({
+  id,
   value,
   onChange,
   items,
   label,
 }: {
+  id?: string;
   value: string;
   onChange: (value: string) => void;
   items: Item[];
@@ -29,6 +31,7 @@ export function PlayerPicker({
       onValueChange={(item: Item | null) => onChange(item?.value ?? '')}
     >
       <ComboboxInput
+        id={id}
         aria-label={label}
         placeholder="Search name, team, or position…"
         showClear

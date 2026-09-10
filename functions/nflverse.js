@@ -1,3 +1,4 @@
+import { sameDaySunday, verifySundayFinal } from './sunday-finals.js';
 import { numericStat } from './football.js';
 import { easternDate } from './rules.js';
 
@@ -90,6 +91,7 @@ export function normalizeSchedule(rows, season, now = Date.now()) {
         id: 'nv_' + r.game_id,
         provider: 'nflverse',
         providerId: r.game_id,
+        espnId: /^\d+$/.test(r.espn ?? '') ? r.espn : null,
         season,
         home_team: r.home_team,
         away_team: r.away_team,
@@ -215,7 +217,25 @@ export async function syncNflverse({
   const games = normalizeSchedule(await read(SOURCES.games), season, now);
   if (!games.length)
     throw Error('nflverse has no usable schedule for this season.');
-  for (const g of games) await store.set('events/' + g.id, g);
+  for (let i = 0; i < games.length; i++) {
+    let game = games[i];
+    if (sameDaySunday(game, now)) {
+      const previous = await store.get('events/' + game.id);
+      // Retain an already verified final if a later refresh is unavailable.
+      if (previous?.completed && previous.finalSource === 'espn' &&
+          previous.espnId === game.espnId && previous.commence_time === game.commence_time &&
+          previous.homeTeamId === game.homeTeamId && previous.awayTeamId === game.awayTeamId) {
+        game = { ...game, scores: previous.scores, completed: true, status: 'FT',
+          finalSource: 'espn', finalVerifiedAt: previous.finalVerifiedAt };
+      }
+      if (!game.completed) {
+        try { game = await verifySundayFinal(game, now, fetchImpl); }
+        catch (error) { game = { ...game, finalCheckError: error.message }; }
+      }
+    }
+    games[i] = game;
+    await store.set('events/' + game.id, game);
+  }
   const cached = await store.get('sync/nflverse');
   let rosterCount = 0;
   if (

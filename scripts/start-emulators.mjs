@@ -24,10 +24,14 @@ const env = {
   XDG_CONFIG_HOME: path.join(work, 'config'),
   FIREBASE_EMULATORS_PATH: path.join(work, 'emulators'),
 };
-if (portable) {
-  env.JAVA_HOME = portable;
-  env.PATH = path.join(portable, 'bin') + path.delimiter + (env.PATH ?? '');
-}
+// Windows treats Path/PATH as the same key, but Node's child-process
+// environment can retain both and select the wrong value. Emit one PATH.
+const inheritedPath = process.env.PATH ?? process.env.Path ?? '';
+for (const key of Object.keys(env)) if (key.toLowerCase() === 'path') delete env[key];
+env.PATH = [path.dirname(process.execPath), ...(portable ? [path.join(portable, 'bin')] : []), inheritedPath].join(path.delimiter);
+env.METADATA_SERVER_DETECTION = 'none';
+env.FUNCTIONS_DISCOVERY_TIMEOUT ??= '60';
+if (portable) env.JAVA_HOME = portable;
 const child = spawn(
   process.execPath,
   [

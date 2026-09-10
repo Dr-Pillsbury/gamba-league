@@ -7,11 +7,13 @@ import {
   SelectItem,
 } from '@/components/ui/select';
 export function Picker({
+  id,
   value,
   onChange,
   items,
   label,
 }: {
+  id?: string;
   value: string;
   onChange: (v: string) => void;
   items: { value: string; label: string }[];
@@ -19,7 +21,7 @@ export function Picker({
 }) {
   return (
     <Select value={value} onValueChange={(v) => v !== null && onChange(v)}>
-      <SelectTrigger aria-label={label} className="picker">
+      <SelectTrigger id={id} aria-label={label} className="picker">
         <SelectValue>
           {items.find((i) => i.value === value)?.label ?? value}
         </SelectValue>

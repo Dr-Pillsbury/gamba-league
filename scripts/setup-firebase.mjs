@@ -1,12 +1,13 @@
 // Use the Firebase CLI's existing authenticated transport. Never print credentials.
-const { selectAccount, setActiveAccount } = require('firebase-tools/lib/auth');
-const { requireAuth } = require('firebase-tools/lib/requireAuth');
-const {
-  getAuthDomains,
-  updateAuthDomains,
-  findUser,
-} = require('firebase-tools/lib/gcp/auth');
-const { Client } = require('firebase-tools/lib/apiv2');
+import firebaseAuth from 'firebase-tools/lib/auth.js';
+import requireAuthModule from 'firebase-tools/lib/requireAuth.js';
+import firebaseGcpAuth from 'firebase-tools/lib/gcp/auth.js';
+import apiv2 from 'firebase-tools/lib/apiv2.js';
+
+const { selectAccount, setActiveAccount } = firebaseAuth;
+const { requireAuth } = requireAuthModule;
+const { getAuthDomains, updateAuthDomains, findUser } = firebaseGcpAuth;
+const { Client } = apiv2;
 const project = 'gamba-league',
   email = process.argv[2];
 async function main() {

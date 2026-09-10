@@ -9,6 +9,7 @@ import { pendingExplanation } from '@/lib/season-metrics.js';
 import { payout } from '@/functions/rules.js';
 import { call } from '@/lib/firebase';
 import type { RecordData } from '@/hooks/use-league-data';
+type BetLeg = { market: string; selection: string; status: string };
 type Props = {
   filter: string;
   setFilter: (s: string) => void;
@@ -86,7 +87,9 @@ export function BetFeed({
           ? date(config.lastScoresSyncAt)
           : 'Not recorded yet'}
       </p>
-      {feedLoading && <p role="status">Loading picks…</p>}
+      {feedLoading && (
+        <output style={{ display: 'block' }}>Loading picks…</output>
+      )}
       {shownBets.length ? (
         shownBets.map((b) => (
           <article className="bet-card" key={b.id}>
@@ -103,7 +106,7 @@ export function BetFeed({
             )}
             {b.legs && (
               <ol className="parlay-results">
-                {b.legs.map((leg: any, i: number) => (
+                {(b.legs as BetLeg[]).map((leg, i) => (
                   <li key={i}>
                     {leg.selection}{' '}
                     <span className="tag">

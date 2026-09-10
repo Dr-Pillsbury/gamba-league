@@ -72,7 +72,7 @@ void test('concurrent overspend permits one debit; retries are idempotent', asyn
   const accepted = picks[results.findIndex((r) => r.status === 'fulfilled')];
   await callable('placeBet', player, accepted);
   const member = (await db.doc('members/' + player.uid).get()).data();
-  assert.equal(member.balance, 17400);
+  assert.equal(member.balance, 400);
   assert.equal(member.weeklyStakes[1], 600);
   assert.equal(
     (await db.collection('ledger').where('uid', '==', player.uid).get()).size,
@@ -95,7 +95,7 @@ void test('deletion and settlement race refunds exactly once and preserves summa
     }),
   ]);
   const member = (await db.doc('members/' + person.uid).get()).data();
-  assert.equal(member.balance, 18000);
+  assert.equal(member.balance, 1000);
   assert.equal(member.weeklyStakes[1], 0);
   const ledger = await db
     .collection('ledger')
@@ -109,7 +109,7 @@ void test('deletion and settlement race refunds exactly once and preserves summa
   await callable('placeBet', person, pick);
   assert.equal(
     (await db.doc('members/' + person.uid).get()).data().balance,
-    18000,
+    1000,
   );
 });
 void test('void, correction, repeated result and review confirmation reconcile', async () => {
@@ -129,7 +129,7 @@ void test('void, correction, repeated result and review confirmation reconcile',
   await settle('won');
   await settle('won');
   let member = (await db.doc('members/' + person.uid).get()).data();
-  assert.equal(member.balance, 18500);
+  assert.equal(member.balance, 1500);
   assert.equal(member.weeklyStakes[1], 500);
   await callable('flagBet', person, {
     betId: id,
@@ -142,14 +142,14 @@ void test('void, correction, repeated result and review confirmation reconcile',
   );
   await settle('lost');
   member = (await db.doc('members/' + person.uid).get()).data();
-  assert.equal(member.balance, 17500);
+  assert.equal(member.balance, 500);
   assert.equal(member.weeklyStakes[1], 500);
   const ledger = await db
     .collection('ledger')
     .where('uid', '==', person.uid)
     .get();
   assert.equal(
-    18000 + ledger.docs.reduce((n, d) => n + d.data().delta, 0),
+    1000 + ledger.docs.reduce((n, d) => n + d.data().delta, 0),
     member.balance,
   );
 });
@@ -200,4 +200,26 @@ void test('permissions deny direct money writes, nonmembers, unauthenticated cal
     callable('joinLeague', collision, { username: 'pLaYeR' }),
     /taken/,
   );
+});
+
+void test('week two credit is spendable once without mutating or double-crediting the wallet', async () => {
+  const person = await googleUser('weeklycredit');
+  const previousStart = new Date(Date.parse(start + 'T12:00:00Z') - 7 * 86400000).toISOString().slice(0, 10);
+  await db.doc('members/' + person.uid).set({ username: 'WeeklyCredit', bankrollVersion: 2,
+    startingBankroll: 1000, balance: 1000, joinedAt: Date.now() - 7 * 86400000,
+    weeklyStakesVersion: 1, weeklyStakes: {} });
+  await db.doc('config/league').update({ startDate: previousStart });
+  try {
+    const pick = input(1500);
+    await callable('placeBet', person, pick);
+    await callable('placeBet', person, pick);
+    await assert.rejects(callable('placeBet', person, input(501)), /bankroll/);
+    const member = (await db.doc('members/' + person.uid).get()).data();
+    assert.equal(member.balance, -500);
+    assert.equal(member.weeklyStakes[2], 1500);
+    await callable('placeBet', person, input(500));
+    assert.equal((await db.doc('members/' + person.uid).get()).data().balance, -1000);
+  } finally {
+    await db.doc('config/league').update({ startDate: start });
+  }
 });

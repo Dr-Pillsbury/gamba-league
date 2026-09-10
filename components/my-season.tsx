@@ -38,9 +38,9 @@ export default function MySeason({
     );
   if (!ready)
     return (
-      <section className="panel" role="status">
+      <output className="panel" style={{ display: 'block' }}>
         Loading your season…
-      </section>
+      </output>
     );
   return (
     <section className="panel season-panel">
@@ -71,11 +71,11 @@ export default function MySeason({
         and any missed-minimum penalties. Voided picks: {metrics.record.void}.
       </p>
       <h3>Bankroll over time</h3>
-      <div
-        className="bankroll-chart"
-        role="img"
-        aria-label={`Bankroll began at ${money(member?.startingBankroll ?? 18000)} and is now ${money(member?.balance ?? 0)}. A transaction table follows.`}
-      >
+      <figure className="bankroll-chart">
+        <figcaption className="sr-only">
+          Bankroll began at {money(member?.startingBankroll ?? 1000)} and is
+          now {money(member?.balance ?? 0)}. A transaction table follows.
+        </figcaption>
         <ResponsiveContainer width="100%" height={240}>
           <LineChart
             data={metrics.trend}
@@ -120,7 +120,7 @@ export default function MySeason({
             />
           </LineChart>
         </ResponsiveContainer>
-      </div>
+      </figure>
       <details>
         <summary>View bankroll transactions</summary>
         <div className="history-scroll">

@@ -16,6 +16,7 @@ import {
 } from './parlay.js';
 import {
   INITIAL,
+  bankrollAdjustment,
   weekAt,
   weekEnd,
   lateJoinBankroll,
@@ -99,6 +100,8 @@ export const joinLeague = clean(async (req) => {
     tx.create(member, {
       username: name,
       balance: INITIAL,
+      bankrollVersion: 2,
+      startingBankroll: INITIAL,
       weeklyStakesVersion: 1,
       weeklyStakes: {},
       joinedAt: Date.now(),
@@ -147,6 +150,7 @@ export const reviewJoinRequest = clean(async (req) => {
       tx.create(member, {
         username: data.username,
         balance: allocation,
+        bankrollVersion: 2,
         weeklyStakesVersion: 1,
         weeklyStakes: {},
         joinedAt: at,
@@ -236,8 +240,6 @@ export const placeBet = clean(async (req) => {
       playerId: null,
       propKey: null,
     };
-    if (event?.provider === 'nflverse' && event.status !== 'NS')
-      throw Error('Only scheduled, not-started games can accept bets.');
     if (event?.provider === 'nflverse' && bet.market === 'Player prop') {
       if (
         !/^00-\d{7}$/.test(String(input.playerId)) ||
@@ -356,7 +358,7 @@ export const placeBet = clean(async (req) => {
       bet.line = null;
       bet.selection = `${bet.legs.length}-leg parlay`;
     }
-    validateBet(bet, now, c, m.data().balance, 0, staked);
+    validateBet(bet, now, c, m.data().balance + bankrollAdjustment(m.data(), now, c.startDate), 0, staked);
     tx.create(ref, {
       ...bet,
       uid: id,
@@ -644,7 +646,8 @@ async function closeWeeks() {
         .filter((m) => m.data().joinedAt < cutoff)
         .map((m) => {
           const balance =
-            INITIAL +
+            (m.data().bankrollVersion === 2 ? INITIAL : 18000) +
+            bankrollAdjustment(m.data(), cutoff - 1, c.startDate) +
             ls.docs.reduce(
               (n, d) =>
                 n +
@@ -703,16 +706,7 @@ export const refreshStandings = clean(async (req) => {
   await closeWeeks();
   return { ok: true };
 });
-export const syncFootballScores = onSchedule(
-  {
-    schedule: '0 10 * * *',
-    timeZone: 'America/New_York',
-    region: 'us-central1',
-    retryCount: 0,
-    timeoutSeconds: 540,
-    maxInstances: 1,
-  },
-  async () => {
+async function checkFootballResults() {
     const c = await config();
     if (!c.dataSyncEnabled) return;
     try {
@@ -777,7 +771,7 @@ export const syncFootballScores = onSchedule(
             doc.id,
             result,
             'nflverse',
-            'nflverse next-day final ' +
+            (event.finalSource === 'espn' ? 'ESPN-verified Sunday final ' : 'nflverse final ') +
               (b.market === 'Player prop' ? 'player statistic' : 'score') +
               ' · full game including overtime',
             true,
@@ -804,5 +798,21 @@ export const syncFootballScores = onSchedule(
       });
       throw error;
     }
-  },
+}
+
+const resultCheckOptions = {
+  timeZone: 'America/New_York',
+  region: 'us-central1',
+  retryCount: 0,
+  timeoutSeconds: 540,
+  maxInstances: 1,
+};
+
+export const syncFootballScores = onSchedule(
+  { ...resultCheckOptions, schedule: '0 10 * * *' },
+  checkFootballResults,
+);
+export const syncSundayFootballScores = onSchedule(
+  { ...resultCheckOptions, schedule: '0 13,16,20 * * 0' },
+  checkFootballResults,
 );

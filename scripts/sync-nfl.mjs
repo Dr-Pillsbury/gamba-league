@@ -1,7 +1,11 @@
 // Owner-run cached schedule/roster import. No server deployment or bet settlement.
-const { selectAccount, setActiveAccount } = require('firebase-tools/lib/auth');
-const { requireAuth } = require('firebase-tools/lib/requireAuth');
-const { Client } = require('firebase-tools/lib/apiv2');
+import firebaseAuth from 'firebase-tools/lib/auth.js';
+import requireAuthModule from 'firebase-tools/lib/requireAuth.js';
+import apiv2 from 'firebase-tools/lib/apiv2.js';
+
+const { selectAccount, setActiveAccount } = firebaseAuth;
+const { requireAuth } = requireAuthModule;
+const { Client } = apiv2;
 const project = 'gamba-league';
 function encode(value) {
   if (value === null) return { nullValue: null };

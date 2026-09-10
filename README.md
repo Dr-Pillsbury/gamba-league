@@ -33,7 +33,7 @@ Improvements in this version:
 
 - Bet feed queries load 30 picks initially, with explicit load-more and server-side week/owner/status filters. Commissioner history loads only on the commissioner tab, with older bets available on demand; the active pending/review queues remain complete.
 - Schedule queries cover the active league week. Rosters load only for the selected prop games. My season loads only that player's ledger and bets when opened; at most 18 snapshots are subscribed.
-- Members carry transactional `weeklyStakes` summaries. Place, delete, void and correction transactions update them with the wallet. Existing accounts initialize once from their bets on the first mutation. Until all members have summaries, the UI falls back to current-week bets. The append-only ledger remains authoritative for historical snapshots and reconciliation. Bet placement no longer scans historical ledger entries; the current rule computes available funds from balance and future-week reserve.
+- Members carry transactional `weeklyStakes` summaries. Place, delete, void and correction transactions update them with the wallet. Existing accounts initialize once from their bets on the first mutation. Until all members have summaries, the UI falls back to current-week bets. The append-only ledger remains authoritative for historical snapshots and reconciliation. Bet placement no longer scans historical ledger entries; the current rule computes available funds from balance and weekly deposit entitlement.
 - My season shows bankroll history, bankroll change, outcome counts, pending stakes and tied weekly ranks. Late-entry allocations are not shown as losses.
 - Weekly check-in combines stake progress, remaining requirement and the Eastern-time deadline. Pending picks explain what they are waiting for. Commissioner health prioritizes open reviews, manual results and picks pending more than 36 hours, alongside import/settlement failures and stale-data status.
 - Player search works in singles and parlays. Device-local drafts are scoped by account and season, restore after reload, retain retry IDs, and clear after successful submission. Drafts are never submitted automatically.
@@ -41,7 +41,7 @@ Improvements in this version:
 
 For live rollouts, deploy composite indexes and Functions changes before the frontend, wait for indexes to become ready, and verify demo identity code is absent from the production client.
 
-Release validation on September 9, 2026: 51 unit tests, 6 emulator integration tests, TypeScript and the production build passed. The owner approved publishing with 71 remaining lint findings (React effects/dependencies, loose types, accessibility checks and CommonJS imports) and build warnings about large chunks and JSON import attributes. These remain follow-up work; passing tests do not imply that every interaction is covered.
+Release validation on September 10, 2026: full lint (zero errors or warnings), 65 unit tests, 7 emulator integration tests, TypeScript and the production build passed. Non-blocking build warnings remain for large chunks and JSON import attributes. Deployed scheduler delivery must be verified during rollout.
 
 A single-season football picks league. Google authentication and Cloud Firestore hold shared league data; Firebase callable functions are the only writers for balances, bets, usernames, and result history. The React/Vinext frontend can be hosted on Sites.
 
@@ -57,11 +57,11 @@ The app now uses free public nflverse CSV files without an API key. The API-SPOR
 
 The 2026 schedule and active rosters were downloaded and checked directly. The adapter matches games by nflverse game_id and players by GSIS ID. It supports passing/rushing/receiving yards and touchdowns, interceptions thrown, receptions, solo tackles and sacks. Total tackles remains commissioner-reviewed until assisted-tackle field semantics are verified. Missing values are never treated as zero. FanDuel Connecticut is the league default; sportsbook and grading-rule entry fields are removed. Freeform/parlay bets and special FanDuel conditions remain commissioner-reviewed.
 
-Scheduled settlement is prepared for 10 a.m. America/New_York daily. It only considers games on a prior Eastern calendar day, at least eight hours after kickoff, with both scores present. Player props additionally require an explicit game/player statistic. Unpublished stats stay pending and retry on subsequent daily runs. Roster imports are cached for 24 hours. Commissioner overrides are preserved. Later provider corrections do not silently change already settled bets; use commissioner correction with a reason.
+Scheduled settlement runs at 10 a.m. America/New_York daily, with additional Sunday checks at 1 p.m., 4 p.m. and 8 p.m. in the same timezone (including DST). Both schedules invoke the same result-check handler. Sunday games can settle that day only after ESPN explicitly reports a final and the game ID, kickoff, teams and final scores are verified. Missing or unavailable final confirmation leaves the game pending, and an already verified Sunday final is retained across refreshes. Other days retain the prior-Eastern-day and eight-hour cutoff. Player props additionally require an explicit game/player statistic from nflverse; their publication can lag final scores, so same-day prop payouts are not guaranteed. Games finishing after Sunday’s 8 p.m. check wait until Monday at 10 a.m. Unpublished stats stay pending and retry on subsequent scheduled runs. Roster imports are cached for 24 hours. Commissioner overrides are preserved. Later provider corrections do not silently change already settled bets; use commissioner correction with a reason.
 
 The owner can refresh schedules and rosters without deploying Cloud Functions:
 
-    node scripts/sync-nfl.cjs hood.travis98@gmail.com
+    node scripts/sync-nfl.mjs hood.travis98@gmail.com
 
 ## Backend activation (deferred)
 
@@ -69,16 +69,16 @@ The project is now on Blaze. All seven functions are ACTIVE, callable endpoints 
 
 ## Deployment and season activation
 
-From PowerShell in the project directory, deploy the web service with `gcloud run deploy gamba-league-web --source . --region us-central1 --project gamba-league --allow-unauthenticated`, then build and deploy Hosting with `& "C:/Program Files/nodejs/npm.cmd" run build` and `node node_modules/firebase-tools/lib/bin/firebase.js deploy --only hosting --project gamba-league --account hood.travis98@gmail.com`. Verify backend resources with `node scripts/activate-backend.cjs --verify-only`; the commissioner activates betting, nflverse imports, and automatic settlement with `node scripts/activate-backend.cjs`.
+From PowerShell in the project directory, deploy the web service with `gcloud run deploy gamba-league-web --source . --region us-central1 --project gamba-league --allow-unauthenticated`, then build and deploy Hosting with `& "C:/Program Files/nodejs/npm.cmd" run build` and `node node_modules/firebase-tools/lib/bin/firebase.js deploy --only hosting --project gamba-league --account hood.travis98@gmail.com`. Verify backend resources with `node scripts/activate-backend.mjs --verify-only`; the commissioner activates betting, nflverse imports, and automatic settlement with `node scripts/activate-backend.mjs`.
 
 ## League accounting
 
-- All money is stored as integer cents. Initial balance: 18000; weekly minimum: 1000.
+- All money is stored as integer cents. Initial balance: 1000; weekly minimum: 1000.
 - Immediate stake debit. Positive American odds profit = stake × odds / 100; negative odds profit = stake × 100 / absolute odds. Profit rounds to cents. Wins return stake + profit; pushes and voids refund stake; losses return zero.
-- Reserve = 1000 × remaining weeks. Available amount = max(0, current balance − reserve). Week 1 starts at $10; settled returns immediately become spendable within the same week while the future-week reserve stays protected.
-- Pending potential payouts cannot be spent. Commissioner corrections may create a reserve shortfall; new betting freezes until funds recover.
+- Bankroll starts at $10. Each Tuesday at 10 a.m. Eastern through Week 18 adds $10 automatically. `bankrollAdjustment` calculates the credit entitlement separately from transactional wallet mutations; all displayed balances and server stake validation include it. Legacy accounts have their unearned future reserve removed without changing winnings or bet history. New accounts use `bankrollVersion: 2`.
+- Pending potential payouts cannot be spent. Commissioner corrections may create a negative bankroll; new betting freezes until funds recover.
 - The weekly minimum may be split into smaller bets. Pushes count; voids do not. A void restores weekly stake capacity within the current cash limit. At the deadline, a missed minimum deducts the amount short from the bankroll as a loss. Early cashouts are not available; players must stick to placed bets.
-- Bet submissions use server time and require an upcoming start inside the current week. Players can delete their own pending bets from the bet feed; deletion refunds the stake and removes it from weekly minimum progress. Settled bets cannot be deleted. A transaction serializes deletion against settlement and refunds once; private deletion records prevent submission retries from recreating removed bets, while ledger and audit history remain intact. Custom events rely on the supplied start time and commissioner review. For a parlay, use the earliest leg start.
+- Bet submissions use server time and require a start inside the current week, accepting bets until exactly three hours after that start. Completed games cannot accept new bets. Players can delete their own pending bets from the bet feed; deletion refunds the stake and removes it from weekly minimum progress. Settled bets cannot be deleted. A transaction serializes deletion against settlement and refunds once; private deletion records prevent submission retries from recreating removed bets, while ledger and audit history remain intact. Custom events rely on the supplied start time and commissioner review. For a parlay, use the earliest leg start.
 - Transactions serialize concurrent bets against the player's wallet. A client request ID makes retries idempotent. Settlement is transactional and repeat-safe.
 - Tuesday 10:15 a.m. snapshots reconstruct balances and weekly compliance at the cutoff from the append-only ledger. Late results and corrections affect live standings, not frozen historical finishes. No automatic winner is declared while results remain pending; the top final live balance is the winner once all Week 18 bets are settled.
 - Usernames are case-insensitively unique, 3–20 letters/numbers/underscores. Joining through Week 1 is automatic; later entry requires commissioner approval. This is one friends league and one season; a season reset or multiple leagues is not implemented.
@@ -105,10 +105,9 @@ The optional WebMCP `view_league_bets` tool changes the same bet-feed tab and fi
 - [nflverse data and attribution](https://github.com/nflverse/nflverse-data)
 - [nflverse update schedule](https://nflreadr.nflverse.com/articles/nflverse_data_schedule.html)
 
-
 ## Setup helper
 
-Run node scripts/setup-firebase.cjs hood.travis98@gmail.com to verify commissioner membership, fill an empty commissioner list and add sign-in domains without resetting league data. Firestore rules deny direct client writes to balances, bets and imported football data.
+Run node scripts/setup-firebase.mjs hood.travis98@gmail.com to verify commissioner membership, fill an empty commissioner list and add sign-in domains without resetting league data. Firestore rules deny direct client writes to balances, bets and imported football data.
 
 Framework updates removed the starter's high-severity advisories. Remaining moderate advisories are in upstream Firebase/CLI dependencies.
 
@@ -120,8 +119,8 @@ Players can flag their own posted wins/losses with a 3–500 character reason. T
 
 Reference: https://d38ayms4az88sz.cloudfront.net/SB/CT/2026-07-30T12-42-48.html
 
-The owner can run `node scripts/activate-backend.cjs --verify-only` for read-only checks. Without that flag, the script enables betting, data imports and automatic settlement and requests an initial refresh; run only after explicit activation approval.
+The owner can run `node scripts/activate-backend.mjs --verify-only` for read-only checks. Without that flag, the script enables betting, data imports and automatic settlement and requests an initial refresh; run only after explicit activation approval.
 
-Weekly betting opens Tuesday at 10 a.m. Eastern and closes Monday at 11:59 p.m. Tuesday midnight–10 a.m. is closed, enforced by both UI and callable validation. Daily nflverse settlement runs at 10 a.m.; the new week opens at that time without waiting for missing results. Snapshots run Tuesday at 10:15 a.m. and preserve the Monday-night balance cutoff; subsequent settlements affect live balances. Eastern DST is respected.
+Weekly betting opens Tuesday at 10 a.m. Eastern and closes Monday at 11:59 p.m. Tuesday midnight–10 a.m. is closed, enforced by both UI and callable validation. nflverse result checks run daily at 10 a.m. and additionally on Sundays at 1 p.m., 4 p.m. and 8 p.m. Eastern; the new week opens at that time without waiting for missing results. Snapshots run Tuesday at 10:15 a.m. and preserve the Monday-night balance cutoff; subsequent settlements affect live balances. Eastern DST is respected.
 
-Late entries are requested via joinLeague after the Monday-night Week 1 deadline. reviewJoinRequest is commissioner-only and transactionally assigns the chosen starting bankroll, reserves the username, and writes the opening allocation to the ledger. Default allocation is $10 per remaining betting week; a closed Tuesday morning does not count the completed week. Requests may be declined; no account is created until approval.
+Late entries are requested via joinLeague after the Monday-night Week 1 deadline. reviewJoinRequest is commissioner-only and transactionally assigns the chosen starting bankroll, reserves the username, and writes the opening allocation to the ledger. Default late-entry allocation is $10, with subsequent weekly credits. Requests may be declined; no account is created until approval.

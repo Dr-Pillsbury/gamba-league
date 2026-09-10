@@ -1,6 +1,10 @@
-export const INITIAL = 18000,
+export const INITIAL = 1000,
   MINIMUM = 1000,
   WEEKS = 18;
+export const BET_WINDOW_MS = 3 * 60 * 60 * 1000;
+export function withinBetWindow(startsAt, now) {
+  return Number.isFinite(startsAt) && now < startsAt + BET_WINDOW_MS;
+}
 export function easternDate(ms) {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/New_York',
@@ -45,8 +49,7 @@ export function bettingOpen(ms, start) {
   return week >= 1 && week <= WEEKS && ms >= weekStart(start, week) && ms < weekEnd(start, week);
 }
 export function lateJoinBankroll(ms, start) {
-  const week = Math.max(1, weekAt(ms, start));
-  return Math.max(0, WEEKS - week + (ms < weekEnd(start, week) ? 1 : 0)) * MINIMUM;
+  return ms < weekEnd(start, WEEKS) ? INITIAL : 0;
 }
 export function minimumShortfall(staked) {
   return Math.max(0, MINIMUM - staked);
@@ -62,8 +65,8 @@ export function payout(stake, odds, status) {
   const profit = Math.floor((2 * numerator + denominator) / (2 * denominator));
   return stake + profit;
 }
-export function funds(balance, opening, staked, week) {
-  const reserve = Math.max(0, WEEKS - week) * MINIMUM;
+export function funds(balance, opening, staked, _week) {
+  const reserve = 0;
   return {
     reserve,
     available: Math.max(0, balance - reserve),
@@ -87,14 +90,14 @@ export function validateBet(data, now, config, balance, opening, staked) {
     );
   if (data.stake > funds(balance, opening, staked, week).available)
     throw Error(
-      'This stake exceeds your weekly allowance or protected balance.',
+      'This stake exceeds your available bankroll.',
     );
   if (
-    !Number.isFinite(data.startsAt) ||
-    data.startsAt <= now ||
+    !withinBetWindow(data.startsAt, now) ||
+    data.startsAt < weekStart(config.startDate, week) ||
     data.startsAt >= weekEnd(config.startDate, week)
   )
-    throw Error('Choose a future event within this football week.');
+    throw Error('Choose an event within this football week, less than 3 hours after its start.');
   for (const key of ['selection'])
     if (
       typeof data[key] !== 'string' ||
@@ -148,4 +151,17 @@ export function grade(bet, event) {
       bet.side === 'over' ? home + away - bet.line : bet.line - home - away;
   else return null;
   return margin === 0 ? 'push' : margin > 0 ? 'won' : 'lost';
+}
+
+// Weekly credits are deterministic entitlements separate from wallet mutations.
+// This credits every account on time without a job or duplicate-credit risk.
+export function bankrollAdjustment(member, now, start) {
+  const week = Math.max(1, Math.min(WEEKS, weekAt(now, start)));
+  const joinedWeek = Math.max(1, Math.min(WEEKS, weekAt(member.joinedAt, start)));
+  const legacyReserve = member.bankrollVersion === 2 ? 0 : (WEEKS - joinedWeek) * MINIMUM;
+  return -legacyReserve + Math.max(0, week - joinedWeek) * MINIMUM;
+}
+export function isGameLive(event, now) {
+  const start = Date.parse(event.commence_time);
+  return !event.completed && now >= start && withinBetWindow(start, now);
 }

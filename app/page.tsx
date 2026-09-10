@@ -1,5 +1,6 @@
 'use client';
 import { BetSlip } from '@/components/bet-slip';
+import Link from 'next/link';
 import { BetFeed } from '@/components/bet-feed';
 import { Picker } from '@/components/league-picker';
 import {
@@ -9,6 +10,7 @@ import {
   useState,
   type SyntheticEvent,
 } from 'react';
+import { useLeagueClock } from '@/hooks/use-league-clock';
 import { useLeagueData } from '@/hooks/use-league-data';
 import { useBetDraft } from '@/hooks/use-bet-draft';
 import { money, date } from '@/lib/league-format';
@@ -34,13 +36,16 @@ import {
   isLocalDevelopment,
 } from '@/lib/firebase';
 import type { ParlayDraft } from '@/lib/parlay-draft';
+import type { RecordData } from '@/hooks/use-league-data';
 import { propsForPosition } from '@/functions/football.js';
 import {
   funds,
   INITIAL,
+  isGameLive,
   weekAt,
   weekStart,
   weekEnd,
+  withinBetWindow,
   bettingOpen,
   lateJoinBankroll,
   payout,
@@ -58,12 +63,33 @@ import {
 
 function BalanceLoading({ failed = false }: { failed?: boolean }) {
   return (
-    <span className="balance-loading" role="status">
+    <output className="balance-loading">
       {!failed && <LoaderCircle size={18} aria-hidden="true" />}
       {failed ? 'Unavailable' : 'Loading…'}
-    </span>
+    </output>
   );
 }
+
+type LeagueToolInput = { scope: 'all' | 'mine' };
+type ModelContext = {
+  registerTool: (
+    tool: {
+      name: string;
+      description: string;
+      inputSchema: object;
+      annotations: object;
+      execute: (input: unknown) => object;
+    },
+    options: { signal: AbortSignal },
+  ) => unknown;
+};
+type LeaderboardRow = RecordData & {
+  uid: string;
+  username: string;
+  balance: number;
+  staked: number;
+};
+type GameScore = { name: string; score: string | number };
 export default function Home() {
   const [user, setUser] = useState<User | null>(null),
     [authReady, setAuthReady] = useState(false);
@@ -86,7 +112,8 @@ function League({
   user: User | null;
   authReady: boolean;
 }) {
-  const [now, setNow] = useState(0),
+  const now = useLeagueClock();
+  const
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState(''),
     [error, setError] = useState(''),
@@ -146,11 +173,7 @@ function League({
         : [],
   );
   const backendEnabled = config?.backendEnabled === true;
-  useEffect(() => {
-    setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 30000);
-    return () => clearInterval(t);
-  }, []);
+
   const start = config?.startDate ?? '2026-09-08',
     actualWeek = now ? weekAt(now, start) : 0,
     week = Math.max(1, Math.min(18, actualWeek)),
@@ -165,13 +188,13 @@ function League({
             .filter((b) => b.week === week && b.status !== 'void')
             .reduce((n, b) => n + b.stake, 0),
     balance = me?.balance ?? INITIAL,
-    { available, reserve } = funds(balance, 0, staked, week);
+    { available } = funds(balance, 0, staked, week);
   const bettableEvents = events
     .filter(
       (e) =>
         !e.completed &&
-        (e.provider !== 'nflverse' || e.status === 'NS') &&
-        Date.parse(e.commence_time) > now &&
+        withinBetWindow(Date.parse(e.commence_time), now) &&
+        Date.parse(e.commence_time) >= weekStart(start, week) &&
         Date.parse(e.commence_time) < weekEnd(start, week),
     )
     .sort((a, b) => Date.parse(a.commence_time) - Date.parse(b.commence_time));
@@ -429,7 +452,8 @@ function League({
     }, 'Bet placed. Everyone in the league can now see your pick.');
   }
   useEffect(() => {
-    const context = (document as any).modelContext;
+    const context = (document as Document & { modelContext?: ModelContext })
+      .modelContext;
     if (!context?.registerTool) return;
     const lifecycle = new AbortController();
     try {
@@ -446,12 +470,18 @@ function League({
               additionalProperties: false,
             },
             annotations: { readOnlyHint: false, untrustedContentHint: true },
-            execute(input: any) {
-              if (!input || !['all', 'mine'].includes(input.scope))
+            execute(input: unknown) {
+              if (
+                typeof input !== 'object' ||
+                input === null ||
+                !('scope' in input) ||
+                !['all', 'mine'].includes(String(input.scope))
+              )
                 throw Error('scope must be all or mine');
-              setFilter(input.scope);
+              const { scope } = input as LeagueToolInput;
+              setFilter(scope);
               setTab('bets');
-              return { view: 'bets', scope: input.scope };
+              return { view: 'bets', scope };
             },
           },
           { signal: lifecycle.signal },
@@ -494,9 +524,9 @@ function League({
         </div>
       )}
       <header>
-        <a className="brand" href="/">
+        <Link className="brand" href="/">
           G<span>/</span>L <small>GAMBA LEAGUE</small>
-        </a>
+        </Link>
         <span className="tag">FOOTBALL · 18 WEEKS</span>
         {user ? (
           <Button
@@ -527,7 +557,7 @@ function League({
           <p>
             {me
               ? 'Your bankroll. Your picks. Your place at the top.'
-              : 'A $180 bankroll. Eighteen weeks. One winner.'}
+              : 'A $10 bankroll. Eighteen weeks. One winner.'}
           </p>
         </div>
         {config && (
@@ -556,10 +586,10 @@ function League({
         </div>
       )}
       {message && (
-        <div role="status" className="notice">
+        <output className="notice">
           <Check size={20} />
           {message}
-        </div>
+        </output>
       )}
       {user && !config && (
         <div className="notice">
@@ -586,7 +616,7 @@ function League({
               () => call('joinLeague', { username }),
               now >= weekEnd(start, 1)
                 ? 'Late-entry request sent to the commissioner.'
-                : 'Welcome to the league. Your $180 bankroll is ready.',
+                : 'Welcome to the league. Your $10 bankroll is ready.',
             );
           }}
         >
@@ -632,44 +662,19 @@ function League({
       )}
       <div className="stats">
         <section>
-          <span>
-            {user || !authReady ? 'Account balance' : 'Starting balance'}
-          </span>
-          <strong>
-            {showBalanceLoading ? balancePlaceholder : money(balance)}
-          </strong>
-          <small>Bankroll · pending stakes deducted</small>
+          <span>Bankroll</span>
+          <strong>{showBalanceLoading ? balancePlaceholder : money(balance)}</strong>
+          <small>Available to bet · $10 added each week</small>
         </section>
         <section>
-          <span>
-            {showBalanceLoading
-              ? 'Available to bet'
-              : me
-                ? 'Available to bet · Week ' + week
-                : 'Week 1 spending limit'}
-          </span>
-          <strong className="lime">
-            {showBalanceLoading ? balancePlaceholder : money(available)}
-          </strong>
-          <small>
-            {balanceLoadFailed
-              ? 'Weekly stakes unavailable'
-              : showBalanceLoading
-                ? 'Loading weekly stakes…'
-                : `${money(staked)} staked this week`}
-          </small>
+          <span>Bet this week</span>
+          <strong className="lime">{showBalanceLoading ? balancePlaceholder : money(staked)}</strong>
+          <small>Total stakes for Week {week}</small>
         </section>
         <section>
-          <span>Protected for future weeks</span>
-          <strong>
-            {showBalanceLoading ? balancePlaceholder : money(reserve)}
-          </strong>
-          <small>
-            <ShieldCheck size={16} />{' '}
-            {showBalanceLoading
-              ? 'Future weeks reserved'
-              : `$10 × ${18 - week} remaining weeks`}
-          </small>
+          <span>NFL week</span>
+          <strong>Week {week}</strong>
+          <small>18-week regular season</small>
         </section>
       </div>
       <div className="workspace">
@@ -689,9 +694,9 @@ function League({
               {tab === 'season' && (
                 <Suspense
                   fallback={
-                    <section className="panel" role="status">
+                    <output className="panel" style={{ display: 'block' }}>
                       Loading your season…
-                    </section>
+                    </output>
                   }
                 >
                   <MySeason
@@ -714,15 +719,14 @@ function League({
                   {config?.lastScoresSyncAt
                     ? 'Last refreshed ' + date(config.lastScoresSyncAt)
                     : 'Waiting for the first schedule import.'}{' '}
-                  Schedules and rosters from nflverse. Results settle the next
-                  day when final data is available.
+                  Schedules and rosters from nflverse. Sunday results can settle the same day after verification; other days use the next-day check.
                 </p>
                 {schedule.length ? (
                   schedule.map((game) => (
                     <article className="bet-card" key={game.id}>
                       <div className="bet-meta">
                         <span>{date(Date.parse(game.commence_time))}</span>
-                        <span className="status">{game.status}</span>
+                        <span className={isGameLive(game, now) ? "tag live-tag" : "status"}>{isGameLive(game, now) ? "Live" : game.status}</span>
                       </div>
                       <h3>
                         {game.away_team} @ {game.home_team}
@@ -732,15 +736,14 @@ function League({
                         {game.completed
                           ? ' · Final: ' +
                             game.scores
-                              .map((s: any) => s.name + ' ' + s.score)
+                              .map((s: GameScore) => s.name + ' ' + s.score)
                               .join(' / ')
                           : ''}
                       </p>
                       <Button
                         variant="outline"
                         disabled={
-                          game.status !== 'NS' ||
-                          Date.parse(game.commence_time) <= now
+                          !bettableEvents.some((e) => e.id === game.id)
                         }
                         onClick={() => {
                           setEventId(game.id);
@@ -799,7 +802,7 @@ function League({
                         ? 'Join the league to get on the board.'
                         : 'Sign in and choose your name to join the league.'}
                       <br />
-                      Everyone starts with the same $180.
+                      Everyone starts with $10. Add $10 each week and grow with winnings.
                     </p>
                   </div>
                 ) : (
@@ -812,7 +815,7 @@ function League({
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {rows.map((m: any, i: number) => (
+                      {(rows as LeaderboardRow[]).map((m, i) => (
                         <TableRow
                           key={m.uid}
                           className={m.uid === user?.uid ? 'my-row' : ''}
@@ -821,7 +824,8 @@ function League({
                             <span className="rank">
                               {i > 0 && rows[i - 1].balance === m.balance
                                 ? rows.findIndex(
-                                    (r: any) => r.balance === m.balance,
+                                    (r: LeaderboardRow) =>
+                                      r.balance === m.balance,
                                   ) + 1
                                 : i + 1}
                             </span>
@@ -886,8 +890,7 @@ function League({
                 </h2>
                 <ol>
                   <li>
-                    <strong>Start with $180.</strong> The highest account
-                    balance after 18 weeks wins. All amounts are play money.
+                    <strong>Climb the bankroll ladder.</strong> Everyone starts with $10 in Week 1. The highest bankroll after the 18-week regular season wins. All amounts are play money.
                   </li>
                   <li>
                     <strong>Wager at least $10 each week.</strong> A week starts
@@ -895,22 +898,18 @@ function League({
                     Daylight saving time is respected.
                   </li>
                   <li>
-                    <strong>Keep future weeks funded.</strong> Reserve $10 for
-                    every remaining week. Week 1 starts with $10 available.
-                    Settled returns can be used again during the same week;
-                    pending payouts cannot be spent.
+                    <strong>Receive $10 each week.</strong> After the initial $10, another $10 is credited every Tuesday at 10 a.m. Eastern for Weeks 2–18, even if you do not sign in. Unspent funds carry over, and settled returns can be bet again immediately. Your bankroll is the amount available to bet; future deposits and pending payouts cannot be spent.
                   </li>
                   <li>
-                    <strong>Place bets before the event starts.</strong> Odds
+                    <strong>Bet before or during a live game.</strong> Betting closes when a game is marked final or three hours after kickoff. Odds
                     and selections are locked once submitted. Use a sportsbook’s
-                    American odds. Split your minimum across multiple bets if
-                    you wish.
+                    American odds. Split your weekly minimum across multiple bets if you wish, or wager more up to your available bankroll.
                   </li>
                   <li>
                     <strong>Stake is deducted immediately.</strong> A win
                     returns stake plus profit. A loss returns nothing. A push or
                     void refunds the stake. Pushes count toward the weekly
-                    minimum; voids do not.
+                    minimum; voided and deleted bets do not.
                   </li>
                   <li>
                     <strong>No early cashouts are available.</strong> Players
@@ -924,7 +923,7 @@ function League({
                     Enter a parlay’s combined odds and earliest leg start.
                   </li>
                   <li>
-                    <strong>Results are traceable.</strong> Supported player
+                    <strong>Results are traceable.</strong> Results are checked daily at 10 a.m. Eastern, plus Sundays at 1 p.m., 4 p.m. and 8 p.m. Eastern. Sunday games can settle the same day after final scores are verified; player props wait for published statistics; incomplete results remain pending. Supported player
                     props use explicit final statistics; missing stats and
                     absent players require commissioner review. All bets follow
                     FanDuel Connecticut rules. Injury protection, participation
@@ -934,16 +933,16 @@ function League({
                     moneylines, spreads, and totals can settle from final
                     scores, including overtime. The commissioner can correct
                     results with a reason. Corrections adjust the balance by the
-                    difference and may temporarily reduce funds below the
-                    reserve.
+                    difference and may temporarily reduce the bankroll below zero.
                   </li>
                   <li>
-                    <strong>Weekly standings preserve the cutoff.</strong>{' '}
-                    Pending bets have already deducted the stake. Later payouts
-                    and corrections affect current standings, not saved weekly
-                    finishes. If you miss the $10 minimum, the amount you were
-                    short is deducted at the deadline as a loss. Tied balances
-                    share rank.
+                    <strong>Standings follow your bankroll.</strong> Live standings include weekly credits, settled returns, stakes and penalties. Weekly finishes preserve the Monday-night cutoff before the next $10 credit; later payouts and corrections do not change saved finishes. Pending stakes are already deducted, and potential payouts do not count. Tied bankrolls share rank.
+                  </li>
+                  <li>
+                    <strong>The $10 weekly minimum still applies.</strong> If you fall short, the unbet portion is deducted at the deadline as a loss. The next weekly credit adds $10 to your remaining bankroll; it does not reset your balance to $10.
+                  </li>
+                  <li>
+                    <strong>Late entries need commissioner approval.</strong> The default starting bankroll is $10, with future weekly credits through Week 18. The commissioner may assign a different starting amount. Missed weeks are not credited retroactively.
                   </li>
                 </ol>
               </section>
@@ -953,9 +952,9 @@ function League({
                 {tab === 'commissioner' && (
                   <Suspense
                     fallback={
-                      <section className="panel" role="status">
+                      <output className="panel" style={{ display: 'block' }}>
                         Loading commissioner tools…
-                      </section>
+                      </output>
                     }
                   >
                     <CommissionerPanel
@@ -994,7 +993,6 @@ function League({
             week={week}
             now={now}
             available={available}
-            reserve={reserve}
             potential={potential}
             authReady={authReady}
             busy={busy}

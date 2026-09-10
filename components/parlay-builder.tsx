@@ -1,11 +1,12 @@
 'use client';
+import { useId } from 'react';
 import { PlayerPicker } from '@/components/player-picker';
 import { Minus, Plus } from 'lucide-react';
 import { propsForPosition } from '@/functions/football.js';
 import { MAX_LEGS, PARLAY_MARKETS } from '@/functions/parlay.js';
 import { Button } from '@/components/ui/button';
+import type { RecordData } from '@/hooks/use-league-data';
 
-type Data = { id: string; [key: string]: any };
 import { newParlayLeg, type ParlayDraft } from '@/lib/parlay-draft';
 export function ParlayBuilder({
   legs,
@@ -16,10 +17,11 @@ export function ParlayBuilder({
 }: {
   legs: ParlayDraft[];
   onChange: (legs: ParlayDraft[]) => void;
-  events: Data[];
-  rosters: Data[];
+  events: RecordData[];
+  rosters: RecordData[];
   defaultEventId: string;
 }) {
+  const pickerId = useId();
   function update(id: string, patch: Partial<ParlayDraft>) {
     onChange(legs.map((leg) => (leg.id === id ? { ...leg, ...patch } : leg)));
   }
@@ -140,9 +142,10 @@ export function ParlayBuilder({
                 )}
                 {leg.market === 'Player prop' && (
                   <>
-                    <label>
+                    <label htmlFor={`${pickerId}-${leg.id}-1`}>
                       Player
                       <PlayerPicker
+                        id={`${pickerId}-${leg.id}-1`}
                         label={`Leg ${index + 1} player`}
                         value={leg.playerId}
                         onChange={(value) =>

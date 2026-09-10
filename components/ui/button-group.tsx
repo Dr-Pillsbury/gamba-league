@@ -22,12 +22,15 @@ const buttonGroupVariants = cva(
   },
 );
 
+/* eslint-disable jsx-a11y/prefer-tag-over-role -- ARIA defines role=group for related controls without requiring a fieldset legend. */
 function ButtonGroup({
   className,
   orientation,
   ...props
 }: React.ComponentProps<'div'> & VariantProps<typeof buttonGroupVariants>) {
   return (
+    // A toolbar-like button group has no equivalent native container element.
+    // eslint-disable-next-line jsx-a11y/prefer-tag-over-role
     <div
       role="group"
       data-slot="button-group"
@@ -37,6 +40,7 @@ function ButtonGroup({
     />
   );
 }
+/* eslint-enable jsx-a11y/prefer-tag-over-role */
 
 function ButtonGroupText({
   className,

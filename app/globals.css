@@ -809,3 +809,5 @@ textarea {
 .local-preview { flex-wrap: wrap; }
 .local-preview button { font-size: .875rem; margin-left: 0; }
 @media (max-width: 600px) { .season-metrics { grid-template-columns: 1fr; } .draft-status { flex-wrap: wrap; } .bet-money { flex-wrap: wrap; } }
+
+.live-tag { color: #a3e635; border: 1px solid currentColor; font-weight: 700; margin-inline: 0.3rem; }

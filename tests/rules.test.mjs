@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   funds,
+  bankrollAdjustment,
+  isGameLive,
   payout,
   weekAt,
   weekStart,
@@ -22,43 +24,53 @@ const bet = {
   sportsbook: 'FanDuel',
   market: 'Spread',
 };
+void test('bets accept kickoff and active games until exactly three hours after start', () => {
+  for (const elapsed of [0, 3600000, 3 * 3600000 - 1]) {
+    assert.equal(validateBet({ ...bet, startsAt: now - elapsed }, now, c, 1000, 1000, 0), 1);
+  }
+  for (const elapsed of [3 * 3600000, 3 * 3600000 + 1]) {
+    assert.throws(() => validateBet({ ...bet, startsAt: now - elapsed }, now, c, 1000, 1000, 0));
+  }
+  const opening = weekStart(c.startDate, 1);
+  assert.throws(() => validateBet({ ...bet, startsAt: opening - 1 }, opening, c, 1000, 1000, 0));
+});
 void test('late entry defaults count only betting weeks still available', () => {
   assert.equal(
     lateJoinBankroll(Date.parse('2026-09-15T14:00:00Z'), c.startDate),
-    17000,
+    1000,
   );
   assert.equal(
     lateJoinBankroll(Date.parse('2026-09-15T05:00:00Z'), c.startDate),
-    17000,
+    1000,
   );
   assert.equal(lateJoinBankroll(weekStart(c.startDate, 18), c.startDate), 1000);
   assert.equal(lateJoinBankroll(weekEnd(c.startDate, 18), c.startDate), 0);
 });
-void test('week one protects $170 and unlocks settled returns during the same week', () => {
-  assert.deepEqual(funds(18000, 18000, 0, 1), {
-    reserve: 17000,
+void test('week one makes the entire $10 bankroll spendable', () => {
+  assert.deepEqual(funds(1000, 1000, 0, 1), {
+    reserve: 0,
     available: 1000,
     needed: 1000,
   });
-  assert.equal(funds(18909, 18000, 1000, 1).available, 1909);
+  assert.equal(funds(1909, 1000, 1000, 1).available, 1909);
   assert.equal(
-    validateBet({ ...bet, stake: 1909 }, now, c, 18909, 18000, 1000),
+    validateBet({ ...bet, stake: 1909 }, now, c, 1909, 1000, 1000),
     1,
   );
   assert.throws(() =>
-    validateBet({ ...bet, stake: 1910 }, now, c, 18909, 18000, 1000),
+    validateBet({ ...bet, stake: 1910 }, now, c, 1909, 1000, 1000),
   );
   assert.throws(() =>
-    validateBet({ ...bet, stake: 1001 }, now, c, 18000, 18000, 0),
+    validateBet({ ...bet, stake: 1001 }, now, c, 1000, 1000, 0),
   );
 });
 void test('next week unlocks prior profit and next $10 allocation', () =>
-  assert.equal(funds(18909, 18909, 0, 2).available, 2909));
+  assert.equal(funds(2909, 2909, 0, 2).available, 2909));
 void test('split stakes count toward the minimum and cannot spend pending returns', () => {
-  assert.equal(funds(17400, 18000, 600, 1).available, 400);
-  assert.equal(funds(17400, 18000, 600, 1).needed, 400);
+  assert.equal(funds(400, 1000, 600, 1).available, 400);
+  assert.equal(funds(400, 1000, 600, 1).needed, 400);
   assert.throws(() =>
-    validateBet({ ...bet, stake: 401 }, now, c, 17400, 18000, 600),
+    validateBet({ ...bet, stake: 401 }, now, c, 400, 1000, 600),
   );
 });
 void test('American odds round payout to cents with stake included', () => {
@@ -100,8 +112,8 @@ void test('Monday closes at midnight; Tuesday 10am opens the next week', () => {
       { ...bet, startsAt: Date.parse('2026-09-15T15:00:00Z') },
       Date.parse('2026-09-15T13:00:00Z'),
       c,
-      18000,
-      18000,
+      1000,
+      1000,
       0,
     ),
   );
@@ -124,14 +136,14 @@ void test('invalid stakes, odds, past games, next-week games, and closed seasons
     { odds: 0 },
     { odds: 99 },
     { odds: 110.5 },
-    { startsAt: now },
+    { startsAt: now - 3 * 3600000 },
     { startsAt: weekStart(c.startDate, 2) },
   ])
     assert.throws(() =>
-      validateBet({ ...bet, ...change }, now, c, 18000, 18000, 0),
+      validateBet({ ...bet, ...change }, now, c, 1000, 1000, 0),
     );
   assert.throws(() =>
-    validateBet(bet, weekStart(c.startDate, 19), c, 18000, 18000, 0),
+    validateBet(bet, weekStart(c.startDate, 19), c, 1000, 1000, 0),
   );
 });
 void test('result corrections use the payout difference, never award twice', () => {
@@ -177,5 +189,20 @@ void test('incomplete games, missing scores and unsupported props require review
     null,
   );
 });
-void test('commissioner correction below reserve freezes new spending', () =>
-  assert.equal(funds(15000, 18000, 0, 1).available, 0));
+void test('negative bankroll freezes new spending', () =>
+  assert.equal(funds(-100, 1000, 0, 1).available, 0));
+
+void test('weekly ladder credits are automatic, capped and preserve legacy winnings', () => {
+  const member = { balance: 1000, bankrollVersion: 2, joinedAt: now };
+  assert.equal(bankrollAdjustment(member, now, c.startDate), 0);
+  assert.equal(bankrollAdjustment(member, weekStart(c.startDate, 2) - 1, c.startDate), 0);
+  assert.equal(bankrollAdjustment(member, weekStart(c.startDate, 2), c.startDate), 1000);
+  assert.equal(bankrollAdjustment(member, weekStart(c.startDate, 20), c.startDate), 17000);
+  assert.equal(18909 + bankrollAdjustment({ joinedAt: now }, now, c.startDate), 1909);
+  const game = { commence_time: new Date(now).toISOString(), completed: false };
+  assert.equal(isGameLive(game, now - 1), false);
+  assert.equal(isGameLive(game, now), true);
+  assert.equal(isGameLive(game, now + 10800000 - 1), true);
+  assert.equal(isGameLive(game, now + 10800000), false);
+  assert.equal(isGameLive({ ...game, completed: true }, now), false);
+});

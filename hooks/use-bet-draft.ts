@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useEffectEvent, useState } from 'react';
 import type { ParlayDraft } from '@/lib/parlay-draft';
+import { MAX_LEGS } from '@/functions/parlay.js';
 const fields = [
   'selection',
   'market',
@@ -40,7 +41,7 @@ function validDraft(value: unknown): value is BetDraft {
   if (
     !fields.every((f) => typeof d[f] === 'string') ||
     !Array.isArray(d.parlayLegs) ||
-    d.parlayLegs.length > 10
+    d.parlayLegs.length > MAX_LEGS
   )
     return false;
   return d.parlayLegs.every((value: unknown) => {
@@ -77,8 +78,17 @@ export function useBetDraft(
   );
   useEffect(() => {
     // Synchronize React with device storage after hydration.
+    // Device storage can only be read after hydration; this one-time update
+    // gates saving until the external draft has been restored.
+    // eslint-disable-next-line react/react-compiler
     setReadyKey(null);
     setDraftNotice('');
+    // A new account/season must not inherit the previous account's form.
+    onRestore({
+      selection: '', market: 'Moneyline', odds: '', stake: '', startsAt: '',
+      eventId: '', side: 'home', line: '', playerId: '', propKey: '',
+      parlayLegs: [], request: { signature: '', id: '' },
+    });
     if (!key) return;
     try {
       const raw = localStorage.getItem(key);

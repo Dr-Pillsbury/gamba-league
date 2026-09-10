@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Picker } from '@/components/league-picker';
 import { CommissionerHealth } from '@/components/commissioner-health';
@@ -7,6 +7,12 @@ import { money, date } from '@/lib/league-format';
 import { call } from '@/lib/firebase';
 import { lateJoinBankroll } from '@/functions/rules.js';
 import type { RecordData } from '@/hooks/use-league-data';
+type ReviewableParlayLeg = {
+  market: string;
+  selection: string;
+  startsAt: number;
+  verifiedBy?: string;
+};
 type Props = {
   config: RecordData | null;
   bets: RecordData[];
@@ -33,6 +39,7 @@ export default function CommissionerPanel({
   adminHasMore,
   loadMoreAdmin,
 }: Props) {
+  const pickerId = useId();
   const [joinBudgets, setJoinBudgets] = useState<Record<string, string>>({});
   const [legReasons, setLegReasons] = useState<Record<string, string>>({});
   const [selectedBet, setSelectedBet] = useState(''),
@@ -165,7 +172,7 @@ export default function CommissionerPanel({
       {bets
         .filter((b) => b.market === 'Parlay' && b.status === 'pending')
         .flatMap((b) =>
-          (b.legs ?? []).map((leg: any, i: number) => {
+          ((b.legs ?? []) as ReviewableParlayLeg[]).map((leg, i) => {
             if (leg.market !== 'Other' || leg.verifiedBy) return null;
             const key = b.id + '_' + i;
             return (
@@ -272,9 +279,10 @@ export default function CommissionerPanel({
           );
         }}
       >
-        <label>
+        <label htmlFor={`${pickerId}-1`}>
           Bet
           <Picker
+            id={`${pickerId}-1`}
             value={selectedBet}
             onChange={(value) => {
               setSelectedBet(value);
@@ -290,9 +298,10 @@ export default function CommissionerPanel({
             ]}
           />
         </label>
-        <label>
+        <label htmlFor={`${pickerId}-2`}>
           Result
           <Picker
+            id={`${pickerId}-2`}
             value={result}
             onChange={setResult}
             label="Result"
@@ -368,8 +377,7 @@ export default function CommissionerPanel({
           : ''}
       </p>
       <p className="hint">
-        Data provider: nflverse · free public data, no API key. Next-day
-        settlement is scheduled for 10 a.m. Eastern when enabled. Missing stats
+        Data provider: nflverse · free public data, no API key. Result checks run daily at 10 a.m., plus Sundays at 1 p.m., 4 p.m. and 8 p.m. Eastern when enabled. Sunday games can settle the same day after final scores are verified; player props wait for published statistics. Missing stats
         require commissioner review.
       </p>
       {config?.dataSyncError && (

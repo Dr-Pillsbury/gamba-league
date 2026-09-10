@@ -1,5 +1,5 @@
 import { propsForPosition, gradeProp } from './football.js';
-import { grade, weekAt, weekEnd } from './rules.js';
+import { grade, weekAt, weekStart, weekEnd, withinBetWindow } from './rules.js';
 
 export const PARLAY_MARKETS = [
   'Moneyline',
@@ -15,20 +15,16 @@ export function normalizeParlayLeg(input, event, players, now, config) {
     throw Error('Choose a supported market for every leg.');
   if (input.market !== 'Other' && !event)
     throw Error('Select a scheduled game for every automatic leg.');
-  if (
-    event &&
-    (event.completed ||
-      (event.provider === 'nflverse' && event.status !== 'NS'))
-  )
-    throw Error('Every leg must be a game that has not started.');
+  if (event?.completed)
+    throw Error('Every leg must be a game that has not finished.');
   const startsAt = event ? Date.parse(event.commence_time) : input.startsAt;
   if (
-    !Number.isFinite(startsAt) ||
-    startsAt <= now ||
+    !withinBetWindow(startsAt, now) ||
+    startsAt < weekStart(config.startDate, weekAt(now, config.startDate)) ||
     startsAt >= weekEnd(config.startDate, weekAt(now, config.startDate))
   )
     throw Error(
-      'Every parlay leg must start in the current betting week and in the future.',
+      'Every parlay leg must start in the current betting week and be less than 3 hours past its start.',
     );
   const leg = {
     market: input.market,

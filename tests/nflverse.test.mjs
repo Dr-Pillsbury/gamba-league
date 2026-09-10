@@ -140,3 +140,34 @@ void test('import caches rosters and treats unpublished season stats as pending'
   assert.equal(calls.length, 2);
   assert.equal(data.get('gameStats/nv_' + row.game_id).hasStats, false);
 });
+
+void test('Sunday imports settle verified finals and retain them through an endpoint outage', async () => {
+  const now = Date.parse('2026-09-13T20:00:00Z');
+  const sunday = { ...row, game_id: '2026_01_BUF_LA', gameday: '2026-09-13', gametime: '13:00', espn: '123' };
+  const csv = Object.keys(sunday).join(',') + '\n' + Object.values(sunday).join(',');
+  const data = new Map([['sync/nflverse', { season: 2026, rostersAt: now }]]);
+  const store = { get: async p => data.get(p), set: async (p, v) => data.set(p, v) };
+  let unavailable = false;
+  const fetchImpl = async url => {
+    if (url === SOURCES.games) return new Response(csv);
+    if (unavailable) throw Error('Provider unavailable');
+    let value;
+    if (url.endsWith('/status')) value = { type: { completed: true, state: 'post', name: 'STATUS_FINAL' } };
+    else if (url.endsWith('/competitions/123')) value = { id: '123', date: '2026-09-13T17:00:00Z', competitors: [{id:'1', homeAway:'home'}, {id:'2', homeAway:'away'}] };
+    else if (url.includes('/teams/')) value = { abbreviation: url.endsWith('/1') ? 'LAR' : 'BUF' };
+    else value = { value: url.includes('/competitors/1/') ? 24 : 21 };
+    return Response.json(value);
+  };
+  await syncNflverse({ store, season: 2026, now, fetchImpl });
+  const path = 'events/nv_' + sunday.game_id;
+  assert.equal(data.get(path).completed, true);
+  assert.equal(data.get(path).finalSource, 'espn');
+  unavailable = true;
+  await syncNflverse({ store, season: 2026, now: now + 3600000, fetchImpl });
+  assert.equal(data.get(path).completed, true);
+  assert.deepEqual(data.get(path).scores, [{name:'LA', score:24}, {name:'BUF', score:21}]);
+  data.delete(path);
+  await syncNflverse({ store, season: 2026, now, fetchImpl });
+  assert.equal(data.get(path).completed, false);
+  assert.match(data.get(path).finalCheckError, /Provider unavailable/);
+});

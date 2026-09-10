@@ -1,7 +1,7 @@
 'use client';
-import { lazy, Suspense, type SyntheticEvent } from 'react';
+import { useId, lazy, Suspense, type SyntheticEvent } from 'react';
 import type { User } from 'firebase/auth';
-import { Ticket, ArrowUpRight, ShieldCheck } from 'lucide-react';
+import { Ticket, ArrowUpRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Picker } from '@/components/league-picker';
 import { PlayerPicker } from '@/components/player-picker';
@@ -9,7 +9,7 @@ import { money, date } from '@/lib/league-format';
 import { login } from '@/lib/firebase';
 import { LEAGUE_RULES } from '@/functions/reviews.js';
 import { propsForPosition } from '@/functions/football.js';
-import { weekEnd } from '@/functions/rules.js';
+import { isGameLive, weekStart, weekEnd, withinBetWindow } from '@/functions/rules.js';
 import { newParlayLeg, type ParlayDraft } from '@/lib/parlay-draft';
 import type { RecordData } from '@/hooks/use-league-data';
 const ParlayBuilder = lazy(() =>
@@ -41,7 +41,6 @@ type Props = {
   week: number;
   now: number;
   available: number;
-  reserve: number;
   potential: number;
   authReady: boolean;
   busy: boolean;
@@ -93,7 +92,6 @@ export function BetSlip({
   week,
   now,
   available,
-  reserve,
   potential,
   authReady,
   busy,
@@ -129,6 +127,7 @@ export function BetSlip({
   resetDraft,
   betSlipMissing,
 }: Props) {
+  const pickerId = useId();
   return (
     <section className="panel slip" id="bet-slip">
       <div className="panel-title">
@@ -166,9 +165,10 @@ export function BetSlip({
             {betSlipMissing.join(', ')}.
           </p>
         )}
-        <label>
+        <label htmlFor={`${pickerId}-1`}>
           Game
           <Picker
+            id={`${pickerId}-1`}
             value={eventId}
             onChange={(v) => {
               setEventId(v);
@@ -181,14 +181,15 @@ export function BetSlip({
               { value: 'manual', label: 'Enter event manually' },
               ...bettableEvents.map((e) => ({
                 value: e.id,
-                label: e.away_team + ' @ ' + e.home_team,
+                label: e.away_team + ' @ ' + e.home_team + (isGameLive(e, now) ? ' · Live' : ''),
               })),
             ]}
           />
         </label>
-        <label>
+        <label htmlFor={`${pickerId}-2`}>
           Market
           <Picker
+            id={`${pickerId}-2`}
             value={market}
             onChange={(v) => {
               setMarket(v);
@@ -202,12 +203,19 @@ export function BetSlip({
         </label>
         {chosenEvent && (
           <p className="tiny">
+            {isGameLive(chosenEvent, now) && <span className="tag live-tag">Live</span>}{' '}
             {date(Date.parse(chosenEvent.commence_time))} ·{' '}
             {chosenEvent.venue || 'Scheduled game'}
           </p>
         )}
         {market === 'Parlay' ? (
-          <Suspense fallback={<p role="status">Loading parlay builder…</p>}>
+          <Suspense
+            fallback={
+              <output style={{ display: 'block' }}>
+                Loading parlay builder…
+              </output>
+            }
+          >
             <ParlayBuilder
               legs={parlayLegs}
               onChange={setParlayLegs}
@@ -216,17 +224,18 @@ export function BetSlip({
               events={events.filter(
                 (e) =>
                   !e.completed &&
-                  (e.provider !== 'nflverse' || e.status === 'NS') &&
-                  Date.parse(e.commence_time) > now &&
+                  withinBetWindow(Date.parse(e.commence_time), now) &&
+                  Date.parse(e.commence_time) >= weekStart(start, week) &&
                   Date.parse(e.commence_time) < weekEnd(start, week),
               )}
             />
           </Suspense>
         ) : structuredProp ? (
           <>
-            <label>
+            <label htmlFor={`${pickerId}-3`}>
               Player
               <PlayerPicker
+                id={`${pickerId}-3`}
                 value={playerId}
                 onChange={(v) => {
                   setPlayerId(v);
@@ -257,9 +266,10 @@ export function BetSlip({
                 event manually” for a custom pick.
               </p>
             )}
-            <label>
+            <label htmlFor={`${pickerId}-4`}>
               Player prop
               <Picker
+                id={`${pickerId}-4`}
                 value={propKey}
                 onChange={(value) => {
                   setPropKey(value);
@@ -285,9 +295,10 @@ export function BetSlip({
               </p>
             ) : (
               <div className="two">
-                <label>
+                <label htmlFor={`${pickerId}-5`}>
                   Direction
                   <Picker
+                    id={`${pickerId}-5`}
                     value={side}
                     onChange={setSide}
                     label="Prop direction"
@@ -320,9 +331,10 @@ export function BetSlip({
           </>
         ) : structured ? (
           <>
-            <label>
+            <label htmlFor={`${pickerId}-6`}>
               Selection
               <Picker
+                id={`${pickerId}-6`}
                 value={side}
                 onChange={setSide}
                 label="Side"
@@ -465,15 +477,13 @@ export function BetSlip({
                     : !inSeason
                       ? 'Betting is not open'
                       : available === 0
-                        ? 'Weekly allowance used'
+                        ? 'Bankroll used'
                         : 'Place bet'}{' '}
           <ArrowUpRight size={17} />
         </Button>
       </form>
       <p className="hint">
-        <ShieldCheck size={15} className="inline-icon" /> Your{' '}
-        {showBalanceLoading ? 'future-week' : money(reserve)} reserve stays
-        protected. Submitted bets cannot be edited.
+        Your full bankroll is available to bet. $10 is added each week. Submitted bets cannot be edited.
       </p>
     </section>
   );
