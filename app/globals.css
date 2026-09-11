@@ -775,6 +775,12 @@ textarea {
   gap: 8px;
   margin: 12px 0;
 }
+.parlay-results .tag {
+  display: inline-block;
+  padding: 2px 5px;
+  line-height: 1.2;
+  vertical-align: baseline;
+}
 .leg-verification {
   display: flex;
   flex-wrap: wrap;

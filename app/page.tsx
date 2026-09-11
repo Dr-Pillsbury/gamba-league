@@ -140,6 +140,7 @@ function League({
     me,
     commissioner,
     events,
+    eventsReady,
     rosters,
     bets,
     ledger,
@@ -290,12 +291,9 @@ function League({
       setPlayerId(d.playerId);
       setPropKey(d.propKey);
       setParlayLegs(d.parlayLegs);
-      if (
-        typeof d.request?.signature === 'string' &&
-        /^[a-f0-9-]{36}$/.test(d.request?.id)
-      )
-        setRequest(d.request);
+      setRequest(d.request);
     },
+    eventsReady && now ? bettableEvents.map((event) => event.id) : null,
   );
   async function action(fn: () => Promise<unknown>, success = '') {
     setBusy(true);

@@ -393,6 +393,7 @@ export function useLeagueData(
     me,
     commissioner,
     events,
+    eventsReady: eventsSource.serverReady && !eventsSource.error,
     rosters: [...rostersSource.records, ...extraRostersSource.records],
     bets,
     ledger: ledgerSource.records,
