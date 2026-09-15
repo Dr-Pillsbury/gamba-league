@@ -12,10 +12,12 @@ Use Workload Identity Federation with a dedicated deployment service account; no
 
 The deployment identity needs `roles/run.sourceDeveloper`, `roles/serviceusage.serviceUsageConsumer`, and `roles/firebasehosting.admin` on project `gamba-league`, plus `roles/iam.serviceAccountUser` on the existing Cloud Run runtime service account. Verify the Cloud Build identity used for source deployment has `roles/run.builder`. Inspect existing identities and permissions before adding bindings.
 
-Set these repository Actions variables after creating the provider:
+The workflow records these public identity identifiers directly (they are not secrets and require no GitHub variables):
 
-- `GCP_WORKLOAD_IDENTITY_PROVIDER`: full `projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/POOL/providers/PROVIDER` name.
-- `GCP_DEPLOY_SERVICE_ACCOUNT`: dedicated deployment service-account email.
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`: `projects/751417505273/locations/global/workloadIdentityPools/github-deploy/providers/github-main`.
+- `GCP_DEPLOY_SERVICE_ACCOUNT`: `github-deploy@gamba-league.iam.gserviceaccount.com`.
+
+The provider additionally restricts tokens to `.github/workflows/deploy.yml` on `main` in this repository. Editing that workflow requires the same care as editing production code.
 
 Exclude `gha-creds-*.json` in `.gitignore`, `.gcloudignore`, and `.dockerignore` before activating the workflow so temporary authentication files cannot enter a build or release.
 

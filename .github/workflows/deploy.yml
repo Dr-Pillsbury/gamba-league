@@ -22,6 +22,8 @@ jobs:
       id-token: write
     env:
       CLOUDSDK_CORE_PROJECT: gamba-league
+      GCP_WORKLOAD_IDENTITY_PROVIDER: projects/751417505273/locations/global/workloadIdentityPools/github-deploy/providers/github-main
+      GCP_DEPLOY_SERVICE_ACCOUNT: github-deploy@gamba-league.iam.gserviceaccount.com
       CI: 'true'
     steps:
       - uses: actions/checkout@v4
@@ -29,13 +31,6 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - name: Check deployment configuration
-        env:
-          PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
-        run: |
-          test -n "$PROVIDER" || { echo '::error::Set GCP_WORKLOAD_IDENTITY_PROVIDER in repository Actions variables.'; exit 1; }
-          test -n "$SERVICE_ACCOUNT" || { echo '::error::Set GCP_DEPLOY_SERVICE_ACCOUNT in repository Actions variables.'; exit 1; }
       - run: npm ci
       - run: npm ci --prefix functions
       - run: npm run lint
@@ -46,8 +41,8 @@ jobs:
         uses: google-github-actions/auth@v3
         with:
           project_id: gamba-league
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@v3
       - name: Deploy Cloud Run
         run: >-
@@ -60,8 +55,8 @@ jobs:
         uses: google-github-actions/auth@v3
         with:
           project_id: gamba-league
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
       - name: Deploy Firebase Hosting
         run: npx --no-install firebase deploy --only hosting --project gamba-league --non-interactive
       - name: Check public site
