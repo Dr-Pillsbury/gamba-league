@@ -119,6 +119,9 @@ export function useBetDraft(
     if (!key || key !== readyKey) return;
     if (unavailable) {
       onRestore(emptyDraft());
+      // Synchronize the notice with invalidated device storage. Clearing the
+      // draft makes this conditional update run only once per invalidation.
+      // eslint-disable-next-line react/react-compiler
       setDraftNotice('Draft cleared because a selected game is no longer available.');
       try {
         localStorage.removeItem(key);

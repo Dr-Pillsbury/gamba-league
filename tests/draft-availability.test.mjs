@@ -4,23 +4,23 @@ import { hasUnavailableDraftGame } from '../lib/draft-availability.ts';
 
 const single = { eventId: 'game-1', market: 'Moneyline', parlayLegs: [] };
 
-test('preserves drafts until the schedule is ready, including failed or pending loads', () => {
+await test('preserves drafts until the schedule is ready, including failed or pending loads', () => {
   assert.equal(hasUnavailableDraftGame(single, null), false);
 });
 
-test('clears a selected game removed from the dropdown, including an empty schedule', () => {
+await test('clears a selected game removed from the dropdown, including an empty schedule', () => {
   assert.equal(hasUnavailableDraftGame(single, ['game-1']), false);
   assert.equal(hasUnavailableDraftGame(single, ['game-2']), true);
   assert.equal(hasUnavailableDraftGame(single, []), true);
 });
 
-test('preserves manual and unfinished selections', () => {
+await test('preserves manual and unfinished selections', () => {
   for (const eventId of ['', 'manual']) {
     assert.equal(hasUnavailableDraftGame({ ...single, eventId }, []), false);
   }
 });
 
-test('clears a parlay when any selected leg disappears', () => {
+await test('clears a parlay when any selected leg disappears', () => {
   const parlay = {
     eventId: '', market: 'Parlay',
     parlayLegs: [{ eventId: 'game-1' }, { eventId: 'game-2' }, { eventId: 'manual' }],
