@@ -28,7 +28,7 @@ async function main() {
     'flagBet',
     'reviewJoinRequest',
   ];
-  for (const name of [...callable, 'closeLeagueWeeks', 'syncFootballScores', 'syncSundayFootballScores']) {
+  for (const name of [...callable, 'closeLeagueWeeks', 'syncFootballScores', 'syncSundayFootballScores', 'syncSundayFootballScoresAfternoon', 'syncSundayFootballScoresEvening']) {
     const f = (await functions.get(base + '/' + name)).body;
     if (f.state !== 'ACTIVE')
       throw Error(name + ' is not ACTIVE. League remains paused.');
@@ -55,7 +55,9 @@ async function main() {
   const jobBase = `/v1/projects/${project}/locations/us-central1/jobs/`;
   for (const [name, schedule] of [
     ['syncFootballScores', '0 10 * * *'],
-    ['syncSundayFootballScores', '0 13,16,20 * * 0'],
+    ['syncSundayFootballScores', '0 13 * * 0'],
+    ['syncSundayFootballScoresAfternoon', '10 16 * * 0'],
+    ['syncSundayFootballScoresEvening', '45 19 * * 0'],
     ['closeLeagueWeeks', '15 10 * * 2'],
   ]) {
     const job = (

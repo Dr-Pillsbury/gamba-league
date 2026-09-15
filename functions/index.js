@@ -813,6 +813,14 @@ export const syncFootballScores = onSchedule(
   checkFootballResults,
 );
 export const syncSundayFootballScores = onSchedule(
-  { ...resultCheckOptions, schedule: '0 13,16,20 * * 0' },
+  { ...resultCheckOptions, schedule: '0 13 * * 0' },
+  checkFootballResults,
+);
+export const syncSundayFootballScoresAfternoon = onSchedule(
+  { ...resultCheckOptions, schedule: '10 16 * * 0' },
+  checkFootballResults,
+);
+export const syncSundayFootballScoresEvening = onSchedule(
+  { ...resultCheckOptions, schedule: '45 19 * * 0' },
   checkFootballResults,
 );

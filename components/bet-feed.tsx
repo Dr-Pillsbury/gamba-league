@@ -108,7 +108,7 @@ export function BetFeed({
               <ol className="parlay-results">
                 {(b.legs as BetLeg[]).map((leg, i) => (
                   <li key={i}>
-                    {leg.selection}{' '}
+                    <span className="parlay-selection">{leg.selection}</span>
                     <span className={'tag ' + leg.status}>
                       {leg.status === 'pending' && leg.market === 'Other'
                         ? 'Needs verification'

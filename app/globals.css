@@ -577,15 +577,20 @@ button {
 }
 .status {
   margin-left: auto;
+  flex-shrink: 0;
   border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 3px 8px;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: #a8bac914;
   text-transform: capitalize;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
 }
 .status.won {
   color: var(--primary);
   border-color: #4d652d;
+  background: #b6eb571a;
 }
 .status.lost,
 .tag.lost {
@@ -596,6 +601,10 @@ button {
 .tag.pending {
   color: #e7c371;
 }
+.status.lost { background: #ff9a8d1a; }
+.status.pending { background: #e7c3711a; border-color: #e7c37166; }
+.status.push { color: #a6cfff; background: #a6cfff1a; border-color: #a6cfff66; }
+.status.void { color: #bdc5cc; background: #bdc5cc1a; border-color: #bdc5cc66; }
 .bet-card h3 {
   font-size: 19px;
   font-weight: 600;
@@ -775,11 +784,24 @@ textarea {
   gap: 8px;
   margin: 12px 0;
 }
+.parlay-results li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  line-height: 1.5;
+}
+.parlay-selection {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .parlay-results .tag {
-  display: inline-block;
-  padding: 2px 5px;
-  line-height: 1.2;
-  vertical-align: baseline;
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 3px 7px;
+  line-height: 1.25;
+  letter-spacing: .6px;
+  white-space: nowrap;
 }
 .leg-verification {
   display: flex;
