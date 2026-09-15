@@ -50,9 +50,10 @@ jobs:
           --source .
           --region us-central1
           --project gamba-league
+          --revision-suffix "gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           --quiet
       - name: Route traffic to the new revision
-        run: gcloud run services update-traffic gamba-league-web --to-latest --region us-central1 --project gamba-league --quiet
+        run: gcloud run services update-traffic gamba-league-web --to-revisions "gamba-league-web-gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}=100" --region us-central1 --project gamba-league --quiet
       - name: Refresh credentials before Hosting deployment
         uses: google-github-actions/auth@v3
         with:
