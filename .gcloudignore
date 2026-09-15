@@ -8,3 +8,6 @@ outputs/
 .codex/
 .agents/
 tests/
+
+# Temporary GitHub Actions authentication
+gha-creds-*.json
