@@ -7,6 +7,7 @@ import { Picker } from '@/components/league-picker';
 import { money, date } from '@/lib/league-format';
 import { pendingExplanation } from '@/lib/season-metrics.js';
 import { payout } from '@/functions/rules.js';
+import { canDeleteBet } from '@/functions/bet-deletion.js';
 import { call } from '@/lib/firebase';
 import type { RecordData } from '@/hooks/use-league-data';
 type BetLeg = { market: string; selection: string; status: string };
@@ -81,6 +82,10 @@ export function BetFeed({
           label="Bet week"
         />
       </div>
+      <p className="hint">
+        Bets can be deleted before kickoff or within 3 minutes of placement.
+        Parlays lock when the first game starts, with the same grace period.
+      </p>
       <p className="hint">
         Last successful data refresh:{' '}
         {config?.lastScoresSyncAt
@@ -158,7 +163,7 @@ export function BetFeed({
               <Button
                 type="button"
                 variant="outline"
-                disabled={busy || !backendEnabled}
+                disabled={busy || !backendEnabled || !canDeleteBet(b, now)}
                 onClick={() => {
                   if (
                     window.confirm(
@@ -172,7 +177,7 @@ export function BetFeed({
                   }
                 }}
               >
-                Delete bet
+                {canDeleteBet(b, now) ? 'Delete bet' : 'Bet locked'}
               </Button>
             )}
             {b.uid === user?.uid &&

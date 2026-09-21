@@ -1,4 +1,5 @@
 import { readWeeklyStakes, weeklyStakePatch } from './weekly-summary.js';
+import { canDeleteBet } from './bet-deletion.js';
 export async function deletePendingBet(db, actor, betId) {
   if (typeof betId !== 'string' || !betId || betId.includes('/'))
     throw Error('Invalid bet.');
@@ -23,6 +24,10 @@ export async function deletePendingBet(db, actor, betId) {
     if (!member.exists) throw Error('Player not found.');
     const weeklyStakes = await readWeeklyStakes(db, tx, member);
     const at = Date.now();
+    if (!canDeleteBet(bet, at))
+      throw Error(
+        'This bet is locked. After a game starts, bets can only be deleted within 3 minutes of placement.',
+      );
     tx.update(member.ref, {
       balance: member.data().balance + bet.stake,
       ...weeklyStakePatch(weeklyStakes, bet.week, -bet.stake),

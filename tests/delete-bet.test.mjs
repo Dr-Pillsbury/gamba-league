@@ -14,7 +14,7 @@ function fixture(status = 'pending') {
         stake: 400,
         week: 1,
         paid: 0,
-        startsAt: 0,
+        startsAt: Date.now() + 3600000,
       },
     ],
     [
@@ -89,4 +89,57 @@ void test('missing and invalid bet IDs are rejected', async () => {
   for (const id of ['', null, 'bets/pick'])
     await assert.rejects(deletePendingBet(db, 'player', id), /Invalid bet/);
   await assert.rejects(deletePendingBet(db, 'player', 'missing'), /not found/);
+});
+
+void test('kickoff locks old bets while new bets have exactly three minutes, without wallet changes on rejection', async (t) => {
+  const now = 1800000000000;
+  t.mock.method(Date, 'now', () => now);
+  for (const [label, patch, allowed] of [
+    ['before kickoff', { startsAt: now + 1, createdAt: now - 86400000 }, true],
+    ['at kickoff', { startsAt: now, createdAt: now - 180000 }, false],
+    [
+      'live fresh bet',
+      { startsAt: now - 3600000, createdAt: now - 179999 },
+      true,
+    ],
+    [
+      'grace expires',
+      { startsAt: now - 3600000, createdAt: now - 180000 },
+      false,
+    ],
+    ['past grace', { startsAt: now - 3600000, createdAt: now - 180001 }, false],
+    ['legacy missing placement time', { startsAt: now - 1 }, false],
+    ['invalid start', { startsAt: null }, false],
+    ['future placement time', { startsAt: now - 1, createdAt: now + 1 }, false],
+    [
+      'parlay earliest leg started',
+      {
+        startsAt: now + 3600000,
+        createdAt: now - 180000,
+        legs: [{ startsAt: now }, { startsAt: now + 3600000 }],
+      },
+      false,
+    ],
+    [
+      'parlay grace',
+      { startsAt: now, createdAt: now - 1000, legs: [{ startsAt: now }] },
+      true,
+    ],
+  ]) {
+    const { db, records } = fixture();
+    Object.assign(records.get('bets/pick'), patch);
+    const before = structuredClone(records);
+    if (allowed) {
+      await deletePendingBet(db, 'player', 'pick');
+      assert.equal(records.has('bets/pick'), false, label);
+      assert.equal(records.get('members/player').balance, 18000, label);
+    } else {
+      await assert.rejects(
+        deletePendingBet(db, 'player', 'pick'),
+        /locked/,
+        label,
+      );
+      assert.deepEqual(records, before, label);
+    }
+  }
 });
